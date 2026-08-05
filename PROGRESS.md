@@ -133,6 +133,50 @@ What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privac
 
 To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 4."
 
+---
+
+### Phase 4 — Single Pricing Model Migration — 2026-08-05
+Architecture Update (Current State)
+
+PalmPyaar now uses a single pricing model.
+
+The historical Phase 2 entries below describe the earlier multi-tier implementation that has since been removed.
+
+Current application behavior:
+- One product only
+- Unlock Full Reading — ₹49
+- No tier selection
+- No package selector
+- No Couples Bundle
+- No All Traditions pricing
+Files modified:
+- `api/create-payment.js`
+- `api/verify-payment.js`
+- `api/generate-reading.js`
+- `js/checkout.js`
+- `js/reveal.js`
+- `providers/templateProvider.js`
+- `providers/geminiProvider.js`
+
+Key decisions made:
+- Removed all multi-tier pricing references (Couples Bundle, ₹79, ₹149, tier, pricing cards, package selector, tier validation, tier parameter).
+- Single pricing model: "Unlock Full Reading — ₹49" only.
+- Updated HMAC-SHA256 payload in both `/api/verify-payment.js` and `/api/generate-reading.js` to exclude `tier` parameter for consistency.
+- Removed `tier` from provider interface (`generateReading` params) in both `templateProvider.js` and `geminiProvider.js`.
+- Removed `tier` from URL parameters and client-side logic in `js/reveal.js`.
+- Verified zero remaining "tier" references across entire project.
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
 
 
 

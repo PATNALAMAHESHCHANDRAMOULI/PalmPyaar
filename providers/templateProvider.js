@@ -1,7 +1,7 @@
 /**
  * PalmPyaar Template Provider
  * Returns deterministic template-based readings using user parameters.
- * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash, tier })
+ * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash })
  */
 
 const SIGNS = [
@@ -53,7 +53,7 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-async function generateReading({ name, dob, birthplace, tradition, photoHash, tier }) {
+async function generateReading({ name, dob, birthplace, tradition, photoHash }) {
   const sign = getZodiacSign(dob);
   const tradName = capitalize(tradition) || 'Western';
   const displayName = name || 'Seeker';

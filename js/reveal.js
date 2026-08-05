@@ -45,7 +45,7 @@
     return str.charAt(0).toUpperCase() + str.slice(1);
   }
 
-  function getPlaceholderData(name, dob, birthplace, tradition, tier) {
+  function getPlaceholderData(name, dob, birthplace, tradition) {
     var sign = getZodiacSign(dob);
     var tradName = capitalize(tradition) || 'Western';
 
@@ -53,7 +53,7 @@
       core: '<p class="reading-paragraph">Your birth configuration in <strong>' + birthplace + '</strong> under the <strong>' + tradName + '</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>' + sign + '</strong>, your palm signature indicates high resilience and reflective depth.</p>' +
             '<p class="reading-paragraph">The subtle curves of your headline suggest a mind that processes experiences thoroughly before taking decisive action. You often notice details others overlook, giving you an understated advantage in long-term endeavors.</p>',
 
-      love: '<p class="reading-paragraph">In personal connections, your energy seeks authenticity and mutual intellectual respect over fleeting excitement. Your palm’s heart line trajectory shows a deep capacity for empathy paired with clear personal boundaries.</p>' +
+      love: '<p class="reading-paragraph">In personal connections, your energy seeks authenticity and mutual intellectual respect over fleeting excitement. Your palm\'s heart line trajectory shows a deep capacity for empathy paired with clear personal boundaries.</p>' +
             '<blockquote class="reading-quote">"True synergy occurs when your grounded nature aligns with a partner who values quiet constancy."</blockquote>' +
             '<p class="reading-paragraph">Light relationship note: Upcoming months favor clear, honest conversations that bring renewed warmth and mutual understanding to your closest bonds.</p>',
 
@@ -78,7 +78,7 @@
     };
   }
 
-  function renderReading(name, dob, birthplace, tradition, tier, readingData) {
+  function renderReading(name, dob, birthplace, tradition, readingData) {
     var titleEl = document.getElementById('reading-user-name');
     var metaEl = document.getElementById('reading-meta');
     var coreEl = document.getElementById('section-core');
@@ -115,7 +115,6 @@
     var dob = params.get('dob') || '';
     var birthplace = params.get('birthplace') || 'Earth';
     var tradition = params.get('tradition') || 'western';
-    var tier = params.get('tier') || 'standard';
 
     // Step 1: Display loading state
     if (loadingEl) loadingEl.hidden = false;
@@ -140,8 +139,8 @@
       .then(function (data) {
         // Step 4: Display reading data ONLY after a successful server response
         if (data && data.success) {
-          var readingData = data.reading || getPlaceholderData(name, dob, birthplace, tradition, tier);
-          renderReading(name, dob, birthplace, tradition, tier, readingData);
+          var readingData = data.reading || getPlaceholderData(name, dob, birthplace, tradition);
+          renderReading(name, dob, birthplace, tradition, readingData);
 
           if (loadingEl) loadingEl.hidden = true;
           if (contentEl) {

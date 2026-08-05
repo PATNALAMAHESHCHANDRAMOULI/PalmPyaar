@@ -32,7 +32,7 @@
 
 ## 2. Product summary
 
-PalmPyaar is a no-signup, static entertainment website. Users enter DOB, birthplace, name, pick a reading style (Western / Vedic / Hellenic), optionally add a photo. A free one-line teaser is shown immediately. A ₹49 payment unlocks a full personalized reading + relationship notes; a ₹79 couples bundle and a ₹149 "all traditions" tier are also offered. Framed explicitly as entertainment throughout — never as factual prediction.
+PalmPyaar is a no-signup, static entertainment website. Users enter DOB, birthplace, name, pick a reading style (Western / Vedic / Hellenic), optionally add a photo. A free one-line teaser is shown immediately.₹49 payment unlocks the complete personalized reading, relationship notes, and all supported traditions in a single purchase. PalmPyaar currently offers one simple pricing plan. Framed explicitly as entertainment throughout — never as factual prediction.
 
 ---
 
@@ -165,7 +165,7 @@ Genuinely free, no credit card — this is why it's the default for `AI_READING=
 
 ### Phase 2 — Payment integration
 - Confirm Section 7a is complete (real or sandbox Instamojo credentials exist) before starting.
-- `/api/create-payment.js`: accepts `{name, dob, birthplace, tradition, photoHash, tier}`, calls the Instamojo Payment Requests API, returns the Instamojo-hosted checkout URL. Pass those fields through Instamojo's `redirect_url` param so they come back on return; Instamojo also collects the buyer's email/phone at checkout — no separate form needed for that.
+- `/api/create-payment.js`: accepts `{name, dob, birthplace, tradition, photoHash}`, calls the Instamojo Payment Requests API, returns the Instamojo-hosted checkout URL. Pass those fields through Instamojo's `redirect_url` param so they come back on return; Instamojo also collects the buyer's email/phone at checkout — no separate form needed for that.
 - `/api/verify-payment.js`: on return from Instamojo, calls Instamojo's Payment Detail API **server-side** with the private API key to confirm `status === "Credit"`. Never trust the redirect's query params alone — they can be typed into a browser by hand.
 - On confirmed payment: compute `token = HMAC-SHA256(name+dob+birthplace+tradition+photoHash+tier+orderId, TOKEN_SECRET)`.
 - Redirect to `/result.html?name=...&dob=...&...&token=...`.
@@ -201,7 +201,7 @@ Genuinely free, no credit card — this is why it's the default for `AI_READING=
 INSTAMOJO_API_KEY
 INSTAMOJO_AUTH_TOKEN
 TOKEN_SECRET
-GEMINI_API_KEY     # optional, only if AI_READING=true — free tier, see Section 7b
+GEMINI_API_KEY     
 ```
 
 ---

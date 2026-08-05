@@ -3,7 +3,7 @@ const crypto = require('crypto');
 /**
  * Vercel Serverless Function: GET /api/verify-payment
  * Called via redirect from Instamojo with query params:
- * payment_id, payment_request_id, payment_status, name, dob, birthplace, tradition, photoHash, tier
+ * payment_id, payment_request_id, payment_status, name, dob, birthplace, tradition, photoHash
  * Calls Instamojo Payment Detail API server-side to confirm payment status === "Credit"
  * On success, generates HMAC-SHA256 token and redirects to /result.html
  */
@@ -22,7 +22,6 @@ module.exports = async function handler(req, res) {
     let birthplace = query.birthplace || '';
     const tradition = query.tradition || 'western';
     const photoHash = query.photoHash || '';
-    const tier = query.tier || 'standard';
 
     // Security Decision: Require mandatory payment parameters passed back from gateway.
     if (!paymentId || !paymentRequestId) {
@@ -95,10 +94,10 @@ module.exports = async function handler(req, res) {
     }
 
     // Security Decision: Compute HMAC-SHA256 signature using secret over verified order ID and user parameters.
-    const rawPayload = [name, dob, birthplace, tradition, photoHash, tier, verifiedOrderId].join(':');
+    const rawPayload = [name, dob, birthplace, tradition, photoHash, verifiedOrderId].join(':');
     const token = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex');
 
-    const resultUrl = `/result.html?name=${encodeURIComponent(name)}&dob=${encodeURIComponent(dob)}&birthplace=${encodeURIComponent(birthplace)}&tradition=${encodeURIComponent(tradition)}&photoHash=${encodeURIComponent(photoHash)}&tier=${encodeURIComponent(tier)}&orderId=${encodeURIComponent(verifiedOrderId)}&token=${token}`;
+    const resultUrl = `/result.html?name=${encodeURIComponent(name)}&dob=${encodeURIComponent(dob)}&birthplace=${encodeURIComponent(birthplace)}&tradition=${encodeURIComponent(tradition)}&photoHash=${encodeURIComponent(photoHash)}&orderId=${encodeURIComponent(verifiedOrderId)}&token=${token}`;
 
     res.writeHead(302, { Location: resultUrl });
     return res.end();

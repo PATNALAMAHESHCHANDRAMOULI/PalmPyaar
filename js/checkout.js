@@ -9,11 +9,6 @@
   var checkoutError = null;
   var form = null;
 
-  function getSelectedTier() {
-    var selected = document.querySelector('input[name="tier"]:checked');
-    return selected ? selected.value : 'standard';
-  }
-
   function setError(message) {
     if (!checkoutError) {
       checkoutError = document.getElementById('checkout-error');
@@ -39,7 +34,6 @@
     var birthplace = (form.birthplace ? form.birthplace.value : '').trim();
     var traditionEl = form.querySelector('input[name="tradition"]:checked');
     var tradition = traditionEl ? traditionEl.value : 'western';
-    var tier = getSelectedTier();
 
     var photoHash = '';
     if (window.PalmTeaser && typeof window.PalmTeaser.getPhotoHash === 'function') {
@@ -70,22 +64,8 @@
       dob: dob,
       birthplace: birthplace,
       tradition: tradition,
-      photoHash: photoHash,
-      tier: tier
+      photoHash: photoHash
     };
-  }
-
-  function updateCtaButtonText(tier) {
-    if (!unlockBtn) unlockBtn = document.getElementById('unlock-btn');
-    if (!unlockBtn) return;
-
-    var prices = {
-      standard: '₹49',
-      couples: '₹79',
-      all: '₹149'
-    };
-    var priceText = prices[tier] || '₹49';
-    unlockBtn.textContent = 'Unlock full reading — ' + priceText;
   }
 
   function startCheckout() {
@@ -148,13 +128,6 @@
     checkoutError = document.getElementById('checkout-error');
     form = document.getElementById('reading-form');
 
-    var tierRadios = document.querySelectorAll('input[name="tier"]');
-    for (var i = 0; i < tierRadios.length; i++) {
-      tierRadios[i].addEventListener('change', function (e) {
-        updateCtaButtonText(e.target.value);
-      });
-    }
-
     if (unlockBtn) {
       unlockBtn.addEventListener('click', function (e) {
         e.preventDefault();
@@ -166,8 +139,7 @@
   }
 
   window.PalmCheckout = {
-    startCheckout: startCheckout,
-    getSelectedTier: getSelectedTier
+    startCheckout: startCheckout
   };
 
   if (document.readyState === 'loading') {

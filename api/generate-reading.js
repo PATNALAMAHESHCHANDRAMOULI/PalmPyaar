@@ -4,7 +4,7 @@ const geminiProvider = require('../providers/geminiProvider');
 
 /**
  * Vercel Serverless Function: GET /api/generate-reading
- * Receives: { name, dob, birthplace, tradition, photoHash, tier, orderId, token }
+ * Receives: { name, dob, birthplace, tradition, photoHash, orderId, token }
  * Security: Recomputes HMAC-SHA256 over received parameters using process.env.TOKEN_SECRET
  * Returns: { success: true, reading: { core, love, pro } }
  */
@@ -24,7 +24,6 @@ module.exports = async function handler(req, res) {
     const birthplace = String(params.birthplace || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 100);
     const tradition = String(params.tradition || 'western');
     const photoHash = String(params.photoHash || '');
-    const tier = String(params.tier || 'standard');
     const orderId = String(params.orderId || '');
     const token = String(params.token || '');
 
@@ -45,7 +44,7 @@ module.exports = async function handler(req, res) {
     }
 
     // Security Decision: Recompute HMAC-SHA256 signature server-side over identical payload string used during payment verification.
-    const rawPayload = [name, dob, birthplace, tradition, photoHash, tier, orderId].join(':');
+    const rawPayload = [name, dob, birthplace, tradition, photoHash, orderId].join(':');
     const expectedToken = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex');
 
     // Security Decision: Use timingSafeEqual to prevent side-channel timing attacks during token comparison.
@@ -68,8 +67,7 @@ module.exports = async function handler(req, res) {
       dob,
       birthplace,
       tradition,
-      photoHash,
-      tier
+      photoHash
     });
 
     return res.status(200).json({

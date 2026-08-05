@@ -1,6 +1,6 @@
 /**
  * PalmPyaar Gemini Provider (STUB ONLY)
- * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash, tier })
+ * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash })
  * Calls to Gemini LLM are NOT implemented yet per Phase 3 specifications.
  * Automatically delegates to templateProvider until AI integration phase is active.
  */

@@ -2,8 +2,8 @@ const crypto = require('crypto');
 
 /**
  * Vercel Serverless Function: POST /api/create-payment
- * Accepts { name, dob, birthplace, tradition, photoHash, tier }
- * Calls Instamojo Payment Requests API and returns { success: true, paymentUrl }
+ * Accepts { name, dob, birthplace, tradition, photoHash }
+ * Calls Instamojo Payment Requests API for single ₹49 product and returns { success: true, paymentUrl }
  */
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    let { name, dob, birthplace, tradition, photoHash, tier } = body;
+    let { name, dob, birthplace, tradition, photoHash } = body;
 
     if (!name || !dob || !birthplace) {
       return res.status(400).json({
@@ -39,14 +39,7 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid date of birth format.' });
     }
 
-    const selectedTier = (tier === 'couples' || tier === 'all') ? tier : 'standard';
-    let amount = 49;
-    if (selectedTier === 'couples') {
-      amount = 79;
-    } else if (selectedTier === 'all') {
-      amount = 149;
-    }
-
+    const amount = 49;
     const validTraditions = ['western', 'vedic', 'hellenic'];
     const selectedTradition = validTraditions.includes(tradition) ? tradition : 'western';
     const cleanPhotoHash = typeof photoHash === 'string' ? photoHash.slice(0, 64) : '';
@@ -55,7 +48,7 @@ module.exports = async function handler(req, res) {
     const proto = req.headers['x-forwarded-proto'] || 'https';
     const hostHeader = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
 
-    const redirectUrl = `${proto}://${hostHeader}/api/verify-payment?name=${encodeURIComponent(name)}&dob=${encodeURIComponent(dob)}&birthplace=${encodeURIComponent(birthplace)}&tradition=${encodeURIComponent(selectedTradition)}&photoHash=${encodeURIComponent(cleanPhotoHash)}&tier=${encodeURIComponent(selectedTier)}`;
+    const redirectUrl = `${proto}://${hostHeader}/api/verify-payment?name=${encodeURIComponent(name)}&dob=${encodeURIComponent(dob)}&birthplace=${encodeURIComponent(birthplace)}&tradition=${encodeURIComponent(selectedTradition)}&photoHash=${encodeURIComponent(cleanPhotoHash)}`;
 
     // Security Decision: Mandate server-side Instamojo credentials to prevent unauthenticated payment requests.
     const apiKey = process.env.INSTAMOJO_API_KEY;
@@ -70,7 +63,7 @@ module.exports = async function handler(req, res) {
     }
 
     const payload = new URLSearchParams();
-    payload.append('purpose', `PalmPyaar Reading (${selectedTier})`);
+    payload.append('purpose', 'PalmPyaar Reading');
     payload.append('amount', String(amount));
     payload.append('buyer_name', name);
     payload.append('redirect_url', redirectUrl);
