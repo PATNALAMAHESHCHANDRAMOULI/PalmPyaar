@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="PalmPyaar — Your full personalized palm & zodiac reading. Permanent access.">
+  <meta name="theme-color" content="#14111F">
+  <title>PalmPyaar — Your Full Personal Reading</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="page-result">
+  <div class="ambient" aria-hidden="true"></div>
+
+  <div class="page page--result">
+    <!-- Premium Loading State -->
+    <div id="reveal-loading" class="reveal-loading" aria-live="polite">
+      <div class="loading-mark" aria-hidden="true">
+        <svg class="loading-star" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="44" stroke="rgba(232, 163, 61, 0.2)" stroke-width="1.5" stroke-dasharray="6 4" />
+          <polygon points="50,15 61,38 85,50 61,62 50,85 39,62 15,50 39,38" fill="none" stroke="url(#loadingGrad)" stroke-width="2" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="loadingGrad" x1="15" y1="15" x2="85" y2="85" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#B5555C" />
+              <stop offset="100%" stop-color="#E8A33D" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h2 id="loading-title" class="loading-title">Aligning your reading…</h2>
+      <p id="loading-sub" class="loading-sub">Tracing palm hash & zodiac geometry</p>
+    </div>
+
+    <!-- Access Denied / Invalid Token State -->
+    <div id="reveal-denied" class="reveal-denied" hidden>
+      <div class="denied-icon" aria-hidden="true">✦</div>
+      <h1 class="denied-title">Access Token Required</h1>
+      <p class="denied-text">
+        This reading URL requires a verified access token from a confirmed payment.
+        If you have unlocked a reading, please check your permanent link.
+      </p>
+      <a href="index.html" class="btn-unlock btn-unlock--secondary">Return to PalmPyaar Home</a>
+    </div>
+
+    <!-- Full Reading Reveal Content -->
+    <main id="reveal-content" class="reveal-content" hidden>
+      <header class="reading-header">
+        <div class="reading-badge" aria-hidden="true">
+          <span class="reading-badge__symbol">✦</span>
+          <span class="reading-badge__text">Verified Access</span>
+        </div>
+        <h1 id="reading-user-name" class="reading-title">Your Personal Reading</h1>
+        <p id="reading-meta" class="reading-meta"></p>
+
+        <!-- Permanent Access & Sharing Notice -->
+        <div class="access-banner">
+          <div class="access-banner__content">
+            <span class="access-banner__icon">🔖</span>
+            <div class="access-banner__text">
+              <strong>Save this link for permanent access</strong>
+              <p>Bookmark this page or share via WhatsApp to view your reading anytime.</p>
+            </div>
+          </div>
+          <a id="share-whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn-share">
+            <span class="btn-share__icon">📱</span> Share / Save on WhatsApp
+          </a>
+        </div>
+      </header>
+
+      <!-- Reading Body Sections -->
+      <article class="reading-body">
+        <section class="reading-section">
+          <h2 class="reading-section__title">01 · Core Zodiac & Palm Overview</h2>
+          <div id="section-core" class="reading-section__content"></div>
+        </section>
+
+        <section class="reading-section">
+          <h2 class="reading-section__title">02 · Love & Light Relationship Notes</h2>
+          <div id="section-love" class="reading-section__content"></div>
+        </section>
+
+        <section id="section-pro-wrapper" class="reading-section reading-section--pro">
+          <h2 class="reading-section__title">03 · Extended Traditions & 12-Month Outlook</h2>
+          <div id="section-pro" class="reading-section__content"></div>
+        </section>
+      </article>
+
+      <footer class="reading-footer">
+        <p class="disclaimer">
+          <span class="disclaimer__label">Entertainment only</span>
+          PalmPyaar readings are designed for fun and personal reflection. They do not constitute financial, legal, health, or professional predictions.
+        </p>
+        <p class="footer__links">
+          <a href="index.html" class="link-subtle">Home</a> ·
+          <a href="refund-policy.html" class="link-subtle">Refund Policy</a>
+        </p>
+      </footer>
+    </main>
+  </div>
+
+  <script src="content/templates.js"></script>
+  <script src="js/reveal.js"></script>
+</body>
+</html>

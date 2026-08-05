@@ -1,0 +1,93 @@
+---
+description: PalmPyaar Project Rules
+alwaysApply: true
+---
+
+Before writing any code:
+
+Read PROJECT_SPEC.md completely.
+
+Read PROGRESS.md completely.
+
+Never ignore either file.
+
+Never redesign the architecture.
+
+Never change the folder structure.
+
+Never change technologies.
+
+Never add React.
+
+Never add NextJS.
+
+Never add Vue.
+
+Never add authentication.
+
+Never add login.
+
+Never add signup.
+
+Use only:
+
+HTML
+
+CSS
+
+Vanilla JavaScript
+
+Backend:
+
+Node.js Vercel Serverless Functions only.
+
+No database.
+
+Payment:
+
+Instamojo.
+
+Reading generation:
+
+Template based first.
+
+Gemini only when AI_READING is enabled.
+
+Complete exactly ONE phase.
+
+Update PROGRESS.md after every phase.
+
+Stop and wait for user approval.
+
+Never expose API keys.
+
+Never commit secrets.
+## Design Rules
+
+The visual quality is a top priority.
+
+Inspired by modern editorial products like Co-Star.
+
+Design principles:
+
+- premium
+- minimal
+- elegant
+- luxury
+- dark theme
+- cinematic
+- spacious
+- mobile-first
+- refined typography
+- smooth micro interactions
+
+Avoid:
+
+- generic templates
+- Bootstrap look
+- loud gradients
+- cartoon astrology
+- clutter
+- cheap UI
+
+PROJECT_SPEC.md is the source of truth.

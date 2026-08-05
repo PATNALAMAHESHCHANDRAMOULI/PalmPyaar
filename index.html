@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="PalmPyaar — a personalized palm and zodiac reading for entertainment. Enter your details and receive a free preview instantly.">
+  <meta name="theme-color" content="#14111F">
+  <title>PalmPyaar — Your reading, for fun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Manrope:wght@400;500;600&family=Noto+Sans:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <div class="page">
+    <header class="hero">
+      <div class="hero__mark" aria-hidden="true">
+        <svg class="signature" viewBox="0 0 320 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="signatureGradient" x1="24" y1="88" x2="296" y2="52" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#B5555C"/>
+              <stop offset="50%" stop-color="#B5555C"/>
+              <stop offset="100%" stop-color="#E8A33D"/>
+            </linearGradient>
+          </defs>
+          <!-- One continuous path: palm heart-line curve → head-line sweep → constellation segments -->
+          <path class="signature-path" d="
+            M 20 92
+            C 20 92, 26 48, 58 40
+            C 90 32, 102 56, 92 70
+            C 82 84, 60 90, 50 82
+            C 70 68, 98 58, 128 54
+            C 158 50, 182 62, 198 78
+            C 210 90, 218 86, 228 64
+            L 252 78
+            L 276 52
+            L 296 68
+          " stroke="url(#signatureGradient)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle class="signature-star" cx="228" cy="64" r="2" fill="#E8A33D"/>
+          <circle class="signature-star" cx="252" cy="78" r="2" fill="#E8A33D"/>
+          <circle class="signature-star" cx="276" cy="52" r="2.5" fill="#E8A33D"/>
+          <circle class="signature-star" cx="296" cy="68" r="2" fill="#E8A33D"/>
+        </svg>
+      </div>
+
+      <h1 class="hero__title">PalmPyaar</h1>
+      <p class="hero__tagline">A personalized reading, for fun — not professional advice or guaranteed prediction.</p>
+
+      <p class="disclaimer" role="note">
+        <span class="disclaimer__label">Entertainment only</span>
+        This is a digital entertainment experience. Readings use your birth details and an optional photo hash — never the image itself — to generate playful, hedged insights. Nothing here is fact or fortune.
+      </p>
+    </header>
+
+    <main class="main">
+      <section class="form-panel" aria-labelledby="form-heading">
+        <h2 id="form-heading" class="visually-hidden">Enter your details</h2>
+
+        <form id="reading-form" class="reading-form" novalidate>
+          <div class="field">
+            <label for="name" class="field__label">Your name</label>
+            <input type="text" id="name" name="name" class="field__input field__input--name" autocomplete="name" placeholder="How you'd like to be addressed" required>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="dob" class="field__label">Date of birth</label>
+              <input type="date" id="dob" name="dob" class="field__input" required>
+            </div>
+            <div class="field">
+              <label for="birthplace" class="field__label">Birthplace</label>
+              <input type="text" id="birthplace" name="birthplace" class="field__input" autocomplete="off" placeholder="City, country" required>
+            </div>
+          </div>
+
+          <fieldset class="field field--tradition">
+            <legend class="field__label">Reading tradition</legend>
+            <div class="tradition-pills" role="radiogroup" aria-label="Reading tradition">
+              <label class="tradition-pill">
+                <input type="radio" name="tradition" value="western" class="tradition-pill__input" checked>
+                <span class="tradition-pill__label">W</span>
+                <span class="tradition-pill__name">Western</span>
+              </label>
+              <label class="tradition-pill">
+                <input type="radio" name="tradition" value="vedic" class="tradition-pill__input">
+                <span class="tradition-pill__label">V</span>
+                <span class="tradition-pill__name">Vedic</span>
+              </label>
+              <label class="tradition-pill">
+                <input type="radio" name="tradition" value="hellenic" class="tradition-pill__input">
+                <span class="tradition-pill__label">H</span>
+                <span class="tradition-pill__name">Hellenic</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="field field--photo">
+            <label for="photo" class="field__label">Optional photo</label>
+            <p class="field__hint">Personalized using your photo — hashed on your device, never uploaded.</p>
+            <div class="photo-upload">
+              <input type="file" id="photo" name="photo" class="photo-upload__input" accept="image/*">
+              <label for="photo" class="photo-upload__label">
+                <span class="photo-upload__icon" aria-hidden="true">+</span>
+                <span class="photo-upload__text">Add a photo</span>
+              </label>
+            </div>
+            <p id="photo-status" class="photo-status" data-state="idle">Optional — hashed on your device, never uploaded.</p>
+          </div>
+        </form>
+
+        <div class="teaser-flow" id="teaser-flow" aria-hidden="true">
+          <span class="teaser-flow__arrow" aria-hidden="true">→</span>
+          <span class="teaser-flow__text">Your free line appears here</span>
+        </div>
+
+        <div id="teaser-reveal" class="teaser" hidden>
+          <p class="teaser__eyebrow">Your free line</p>
+          <p id="teaser-sign" class="teaser__sign"></p>
+          <blockquote id="teaser-line" class="teaser__line"></blockquote>
+        </div>
+
+        <div class="cta-block">
+          <div class="tier-selector" role="radiogroup" aria-label="Reading package">
+            <label class="tier-option">
+              <input type="radio" name="tier" value="standard" class="tier-option__input" checked>
+              <span class="tier-option__box">
+                <span class="tier-option__title">Standard Reading</span>
+                <span class="tier-option__price">₹49</span>
+              </span>
+            </label>
+            <label class="tier-option">
+              <input type="radio" name="tier" value="couples" class="tier-option__input">
+              <span class="tier-option__box">
+                <span class="tier-option__title">Couples Bundle</span>
+                <span class="tier-option__price">₹79</span>
+              </span>
+            </label>
+            <label class="tier-option">
+              <input type="radio" name="tier" value="all" class="tier-option__input">
+              <span class="tier-option__box">
+                <span class="tier-option__title">All Traditions</span>
+                <span class="tier-option__price">₹149</span>
+              </span>
+            </label>
+          </div>
+
+          <p id="checkout-error" class="checkout-error" hidden></p>
+
+          <button type="button" id="unlock-btn" class="btn-unlock" disabled aria-disabled="true">
+            Unlock full reading — ₹49
+          </button>
+          <p class="cta-block__includes">Full personalized reading · Light relationship notes · Instant delivery</p>
+          <p class="cta-block__note">
+            One-time payment · <a href="refund-policy.html" class="link-subtle">Refund policy</a>
+          </p>
+        </div>
+      </section>
+
+      <section class="how-it-works" aria-labelledby="how-heading">
+        <h2 id="how-heading" class="how-it-works__title">How it works</h2>
+        <ol class="steps">
+          <li class="step">
+            <span class="step__number">01</span>
+            <div class="step__content">
+              <h3 class="step__heading">Enter your details</h3>
+              <p class="step__text">Name, date of birth, birthplace, and your preferred tradition. Add an optional photo — it stays on your device.</p>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step__number">02</span>
+            <div class="step__content">
+              <h3 class="step__heading">See your free line</h3>
+              <p class="step__text">We derive your sign and combine it with your photo hash to reveal one personalized teaser — instantly, for fun.</p>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step__number">03</span>
+            <div class="step__content">
+              <h3 class="step__heading">Unlock the full reading</h3>
+              <p class="step__text">A one-time payment unlocks your complete reading and light relationship notes — delivered on the same page.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p class="footer__copy">PalmPyaar · Entertainment only · Not professional advice</p>
+      <p class="footer__links">
+        <a href="refund-policy.html" class="link-subtle">Refund policy</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="content/templates.js"></script>
+  <script src="js/teaser.js"></script>
+  <script src="js/checkout.js"></script>
+</body>
+</html>
