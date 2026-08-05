@@ -131,7 +131,92 @@ Phase 3 template provider fixes:
 
 What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
 
+---
+
+### Phase 4 — Gemini Provider Preparation — 2026-08-05
+Files modified:
+- `providers/geminiProvider.js`
+
+Key decisions made:
+- Updated `providers/geminiProvider.js` export to include `name: "gemini"` for provider identification.
+- Added clear TODO comments showing exactly where the Gemini API call will be inserted.
+- Maintained fallback to `templateProvider` for all errors.
+- No API calls added yet — provider remains a stub ready for live integration.
+- `templateProvider.js` unchanged.
+- `generate-reading.js` unchanged.
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (future, for live integration)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
 To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 4."
+
+---
+
+### Phase 4 — Prompt Architecture Preparation — 2026-08-05
+Files created/modified:
+- `prompts/readingPrompt.js` (created)
+- `providers/geminiProvider.js` (modified)
+
+Key decisions made:
+- Created `prompts/readingPrompt.js` with `buildReadingPrompt(params)` function returning a placeholder string.
+- Updated `providers/geminiProvider.js` with TODO comments showing where to import and use `buildReadingPrompt()`.
+- No real prompt written yet — placeholder only.
+- No Gemini API calls added.
+- `generate-reading.js` unchanged.
+- `templateProvider.js` unchanged.
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (future, for live integration)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
+---
+
+### Phase 4 — Live Gemini Integration — 2026-08-05
+Files modified:
+- `providers/geminiProvider.js`
+
+Key decisions made:
+- Implemented live Gemini API integration using the official Google Generative AI JavaScript SDK (`@google/generative-ai`).
+- Uses model `gemini-2.5-flash-lite` as specified.
+- Reads `process.env.GEMINI_API_KEY` for authentication.
+- Imports `buildReadingPrompt()` from `prompts/readingPrompt.js` to construct the prompt.
+- Sends a single request to Gemini expecting plain text response (not JSON).
+- Added `parseGeminiResponse()` helper to split plain text into `{ core, love, pro }` sections using section headers or paragraph distribution.
+- Robust fallback: on ANY error (API error, timeout, invalid response, missing API key, empty response), immediately falls back to `templateProvider.generateReading(params)`.
+- Never throws uncaught errors, never breaks the reading flow.
+- 15-second timeout via AbortController to prevent serverless function hangs.
+- `generate-reading.js` unchanged.
+- `templateProvider.js` unchanged.
+- `readingPrompt.js` unchanged (still uses placeholder prompt).
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (now required for live AI readings)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
 
 ---
 
@@ -177,7 +262,88 @@ Deviations from spec, if any:
 
 What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
 
+---
 
+### Phase 4 — Project Setup for Gemini SDK — 2026-08-05
+Files created/modified:
+- `package.json` (created)
 
+Key decisions made:
+- Created `package.json` in project root with single dependency: `@google/generative-ai` (v0.21.0).
+- No other dependencies added.
+- No application code, providers, prompts, or APIs modified.
+- This prepares the project for the official Gemini SDK used in `providers/geminiProvider.js`.
 
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (required for live AI readings)
 
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
+---
+
+### Phase 4 — Production-Ready Gemini Prompt — 2026-08-05
+Files modified:
+- `prompts/readingPrompt.js`
+
+Key decisions made:
+- Replaced placeholder prompt with production-ready Gemini prompt in `buildReadingPrompt(params)`.
+- Prompt generates entertainment-only readings with premium, elegant, mysterious, emotionally intelligent, modern voice.
+- Never claims certainty, never promises future events, never mentions being an AI, never mentions prompts/system instructions.
+- Personalizes using: name, DOB (formatted), birthplace, tradition (with label mapping), zodiac sign (calculated from DOB), optional photo hash indicator.
+- Response structure enforced with exact section markers: ===CORE===, ===LOVE===, ===PRO===.
+- CORE: personality, strengths, challenges, palm + zodiac interpretation (2-3 paragraphs).
+- LOVE: relationship energy, communication, emotional patterns, gentle guidance (2-3 paragraphs).
+- PRO: career, creativity, next 12 months as thematic landscape, practical reflection (2-3 paragraphs).
+- Beautiful, concise paragraphs; no markdown; no JSON; ends with entertainment disclaimer.
+- Zodiac sign calculated from DOB using standard Western boundaries.
+- Tradition labels mapped: western→Western, vedic→Vedic, hellenic→Hellenic.
+- Photo hash included as subtle reference when provided (first 8 chars).
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (required for live AI readings)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
+---
+
+### Phase 4 — Prompt & Provider Refinements — 2026-08-05
+Files modified:
+- `providers/geminiProvider.js`
+- `prompts/readingPrompt.js`
+
+Key decisions made:
+- Updated `parseGeminiResponse()` in `geminiProvider.js` to parse ONLY the exact required markers: `===CORE===`, `===LOVE===`, `===PRO===`. Removed all regex guessing and paragraph heuristics. Returns empty strings for missing sections.
+- Increased Gemini temperature from 0.7 to 0.9 for more creative, varied outputs.
+- Removed photo hash value from prompt. Now only states whether a palm photo was provided (no hash exposure).
+- Replaced "master entertainment astrologer" with "seasoned entertainment astrologer" for a more natural writing role.
+- Replaced "Never use markdown" with: "Do not use bullet lists, tables, Markdown syntax, or JSON. Use plain paragraphs beneath the required section markers."
+- Added target word counts to each section:
+  - CORE: 180–250 words
+  - LOVE: 150–220 words
+  - PRO: 180–250 words
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (required for live AI readings)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
