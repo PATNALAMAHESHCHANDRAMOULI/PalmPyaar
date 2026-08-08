@@ -2,8 +2,32 @@ const crypto = require('crypto');
 
 /**
  * Vercel Serverless Function: POST /api/create-payment
- * Accepts { name, dob, birthplace, tradition, photoHash }
- * Calls Instamojo Payment Requests API for single ₹49 product and returns { success: true, paymentUrl }
+ *
+ * Replaces the previous third-party payment gateway with a DIRECT UPI
+ * payment flow (no PSP / bank API).
+ *
+ * Accepts { name, dob, birthplace, tradition, photoHash } and returns a
+ * payment instruction payload:
+ *   {
+ *     success: true,
+ *     payment: {
+ *       upiId,          // PAYMENT_UPI_ID (the payee VPA)
+ *       amount,         // PAYMENT_AMOUNT (integer rupees, default 49)
+ *       payeeName,      // PAYMENT_PAYEE_NAME (default "PalmPyaar")
+ *       note,           // PAYMENT_NOTE (default "PalmPyaar Reading")
+ *       orderId,        // PP + 10 random hex chars (used as UPI tid)
+ *       deepLink        // upi://pay?pa=...&pn=...&am=...&cu=INR&tn=...&tid=<orderId>
+ *     }
+ *   }
+ *
+ * The upi:// deep link opens the customer's UPI app (Google Pay, PhonePe,
+ * Paytm, etc.) for an inline payment to the configured VPA.
+ *
+ * SECURITY: This endpoint NEVER mints an access token and NEVER grants a
+ * reading. Direct UPI gives no server-side settlement callback, so granting
+ * without evidence is impossible by design. Only the owner can mint a token
+ * via /api/admin-confirm-payment AFTER verifying the payment in their own
+ * UPI app (see that handler for details).
  */
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,8 +46,8 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Security Decision: Validate and sanitize string inputs with 100-character length limits
-    // to prevent parameter bloating, log injection, or memory overhead.
+    // Security Decision: Validate and sanitize string inputs with 100-character
+    // length limits to prevent parameter bloating, log injection, or memory overhead.
     name = String(name).trim().replace(/[\r\n\t]/g, ' ');
     birthplace = String(birthplace).trim().replace(/[\r\n\t]/g, ' ');
 
@@ -39,79 +63,75 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid date of birth format.' });
     }
 
-    const amount = 49;
-    const validTraditions = ['western', 'vedic', 'hellenic'];
-    const selectedTradition = validTraditions.includes(tradition) ? tradition : 'western';
-    const cleanPhotoHash = typeof photoHash === 'string' ? photoHash.slice(0, 64) : '';
+    // Security Decision: Whitelist the reading tradition so the token payload
+    // (and later HMAC) is built from a fixed, known value set.
+    const TRADITIONS = ['western', 'vedic', 'hellenic'];
+    const selectedTradition = String(tradition || 'western');
+    if (!TRADITIONS.includes(selectedTradition)) {
+      return res.status(400).json({ success: false, error: 'Invalid reading tradition.' });
+    }
 
-    // Determine host for redirect URL
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const hostHeader = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+    // Security Decision: Photo hash must be the client-side SHA-256 hex digest
+    // (64 chars) or empty. The image itself is never uploaded.
+    const cleanPhotoHash = String(photoHash || '').trim().toLowerCase();
+    if (cleanPhotoHash && !/^[a-f0-9]{64}$/.test(cleanPhotoHash)) {
+      return res.status(400).json({ success: false, error: 'Invalid photo hash.' });
+    }
 
-    const redirectUrl = `${proto}://${hostHeader}/api/verify-payment?name=${encodeURIComponent(name)}&dob=${encodeURIComponent(dob)}&birthplace=${encodeURIComponent(birthplace)}&tradition=${encodeURIComponent(selectedTradition)}&photoHash=${encodeURIComponent(cleanPhotoHash)}`;
-
-    // Security Decision: Mandate server-side Instamojo credentials to prevent unauthenticated payment requests.
-    const apiKey = process.env.INSTAMOJO_API_KEY;
-    const authToken = process.env.INSTAMOJO_AUTH_TOKEN;
-    const instamojoHost = process.env.INSTAMOJO_HOST || (process.env.INSTAMOJO_LIVE === 'true' ? 'www.instamojo.com' : 'test.instamojo.com');
-
-    if (!apiKey || !authToken) {
+    // --- UPI configuration ---
+    const upiId = (process.env.PAYMENT_UPI_ID || '').trim().toLowerCase();
+    if (!upiId) {
       return res.status(500).json({
         success: false,
-        error: 'Instamojo credentials missing on server. Set INSTAMOJO_API_KEY and INSTAMOJO_AUTH_TOKEN in Vercel environment variables.'
+        error: 'Server configuration error: PAYMENT_UPI_ID is missing. Set the payee UPI ID (VPA) in environment variables.'
       });
     }
 
-    const payload = new URLSearchParams();
-    payload.append('purpose', 'PalmPyaar Reading');
-    payload.append('amount', String(amount));
-    payload.append('buyer_name', name);
-    payload.append('redirect_url', redirectUrl);
-    payload.append('send_email', 'false');
-    payload.append('send_sms', 'false');
-    payload.append('allow_repeated_payments', 'false');
-
-    const instamojoEndpoint = `https://${instamojoHost}/api/1.1/payment-requests/`;
-
-    // Security Decision: Use AbortController with a 10-second timeout to prevent serverless function hangs or resource exhaustion on external API calls.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    let response;
-    try {
-      response = await fetch(instamojoEndpoint, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': apiKey,
-          'X-Auth-Token': authToken,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: payload.toString(),
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    const data = await response.json();
-
-    if (response.ok && data.success && data.payment_request && data.payment_request.longurl) {
-      return res.status(200).json({
-        success: true,
-        paymentUrl: data.payment_request.longurl
+    const rawAmount = process.env.PAYMENT_AMOUNT || '49';
+    const amount = parseInt(rawAmount, 10);
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 100000) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: PAYMENT_AMOUNT must be a positive integer (rupees) no larger than 100000.'
       });
     }
 
-    const errorMsg = (data && (data.message || (data.reason && JSON.stringify(data.reason)))) || 'Failed to create payment request at Instamojo';
-    return res.status(400).json({
-      success: false,
-      error: errorMsg
+    // UPI pn field is limited (~25 chars); keep payee name short and safe.
+    const payeeName = (process.env.PAYMENT_PAYEE_NAME || 'PalmPyaar').trim().replace(/[\r\n\t]/g, ' ').slice(0, 25);
+    const note = (process.env.PAYMENT_NOTE || 'PalmPyaar Reading').trim().replace(/[\r\n\t]/g, ' ').slice(0, 30);
+
+    // Security Decision: Order ID is generated server-side (never trusted from the
+    // client). Format "PP" + 10 random uppercase hex chars = 12 chars, well within
+    // the UPI tid limit, and unguessable so it can be bound into the access token.
+    const orderId = 'PP' + crypto.randomBytes(5).toString('hex').toUpperCase();
+
+    // Build the Google Pay / UPI-app-compatible deep link (standard upi:// scheme).
+    const deepLinkParams = new URLSearchParams({
+      pa: upiId,
+      pn: payeeName,
+      am: String(amount),
+      cu: 'INR',
+      tn: note,
+      tid: orderId
+    });
+    const deepLink = 'upi://pay?' + deepLinkParams.toString();
+
+    return res.status(200).json({
+      success: true,
+      payment: {
+        upiId,
+        amount,
+        payeeName,
+        note,
+        orderId,
+        deepLink
+      }
     });
   } catch (err) {
-    const isAbort = err.name === 'AbortError';
+    console.error('[create-payment] error:', err);
     return res.status(500).json({
       success: false,
-      error: isAbort ? 'Payment gateway request timed out. Please try again.' : 'Server error processing payment: ' + (err.message || String(err))
+      error: 'Could not create payment instruction. Please try again.'
     });
   }
 };

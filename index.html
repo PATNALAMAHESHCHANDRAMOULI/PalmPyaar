@@ -121,17 +121,59 @@
           <blockquote id="teaser-line" class="teaser__line"></blockquote>
         </div>
 
-        <div class="cta-block">
+        <div id="cta-block" class="cta-block">
           <p id="checkout-error" class="checkout-error" hidden></p>
 
           <button type="button" id="unlock-btn" class="btn-unlock" disabled aria-disabled="true">
             Unlock full reading — ₹49
           </button>
-          <p class="cta-block__includes">Full personalized reading · Light relationship notes · Instant delivery</p>
+          <p class="cta-block__includes">Full personalized reading · Light relationship notes · Easy UPI payment</p>
           <p class="cta-block__note">
             One-time ₹49 · <a href="refund-policy.html" class="link-subtle">Refund policy</a>
           </p>
         </div>
+      </section>
+
+      <!-- Direct UPI payment panel (shown after /api/create-payment) -->
+      <section id="payment-panel" class="payment-panel" aria-labelledby="payment-heading" hidden>
+        <h2 id="payment-heading" class="payment-panel__title">Pay via UPI</h2>
+
+        <p class="payment-panel__summary">
+          Pay <strong id="payment-amount">₹49</strong> to
+          <strong id="payment-payee">PalmPyaar</strong>
+        </p>
+
+        <a id="payment-deeplink-btn" class="btn-unlock" href="#" rel="noopener noreferrer">
+          Pay with Google Pay / PhonePe / Paytm
+        </a>
+        <p class="payment-panel__hint">Opens your UPI app to complete the payment.</p>
+
+        <div class="payment-panel__upi-row">
+          <span>Or pay this UPI ID:</span>
+          <code id="payment-upi-id"></code>
+          <button type="button" id="payment-copy-btn" class="btn-copy">Copy</button>
+        </div>
+
+        <ol class="payment-panel__steps">
+          <li>Complete the payment in your UPI app (Google Pay, PhonePe, Paytm, …).</li>
+          <li>Copy the 12-character UTR (transaction reference) from your payment history.</li>
+          <li>Paste it below and submit. PalmPyaar confirms payments manually and sends your permanent link once your credit is verified.</li>
+        </ol>
+
+        <form id="payment-utr-form" class="utr-form" novalidate>
+          <label for="payment-utr-input" class="utr-form__label">UPI transaction reference (UTR)</label>
+          <input type="text" id="payment-utr-input" class="utr-form__input" inputmode="latin" autocomplete="off" placeholder="e.g. 6A3B2C9D1E" required>
+          <button type="submit" id="payment-utr-submit" class="btn-unlock btn-unlock--secondary">I've paid — submit</button>
+        </form>
+
+        <p id="payment-utr-status" class="utr-status" hidden></p>
+
+        <p class="payment-panel__note">
+          Confirmation is manual: your permanent reading link is sent only after your UPI credit is verified.
+          One-time ₹49 · <a href="refund-policy.html" class="link-subtle">Refund policy</a>
+        </p>
+
+        <button type="button" id="payment-back-btn" class="payment-panel__back link-subtle">← Back to form</button>
       </section>
 
       <section class="how-it-works" aria-labelledby="how-heading">
@@ -155,7 +197,7 @@
             <span class="step__number">03</span>
             <div class="step__content">
               <h3 class="step__heading">Unlock the full reading</h3>
-              <p class="step__text">A one-time payment unlocks your complete reading and light relationship notes — delivered on the same page.</p>
+              <p class="step__text">Pay once via UPI. After your payment is confirmed, your complete reading and light relationship notes are delivered.</p>
             </div>
           </li>
         </ol>

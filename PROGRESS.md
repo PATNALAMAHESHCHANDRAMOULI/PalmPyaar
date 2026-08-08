@@ -133,6 +133,62 @@ What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privac
 
 ---
 
+### Phase 4 — Development Payment Bypass — 2026-08-05
+Files modified:
+- `api/create-payment.js`
+
+Key decisions made:
+- Added DEVELOPMENT-ONLY payment bypass in `/api/create-payment.js`.
+- Bypass activates ONLY when `process.env.DEV_BYPASS === "true"`.
+- When active, bypasses Instamojo entirely, generates the same HMAC-SHA256 token as `verify-payment.js` using `TOKEN_SECRET`, and returns a direct redirect URL to `result.html` with identical query parameters (name, dob, birthplace, tradition, photoHash, orderId, token).
+- The reading is still fetched through `/api/generate-reading.js` which verifies the HMAC token exactly as before.
+- No client-side fake token generation, no skipping `generate-reading.js`, no changes to provider architecture or Gemini integration.
+- Production flow remains completely unchanged when DEV_BYPASS is false or missing.
+- Clear comments added explaining this bypass exists ONLY for local development and MUST NOT be enabled in production.
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (required for live AI readings)
+- `DEV_BYPASS` (optional, "true" to enable dev payment bypass)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
+---
+
+### Phase 4 — Development Testing Bypass — 2026-08-05
+Files modified:
+- `api/generate-reading.js`
+
+Key decisions made:
+- Added development-only testing bypass for HMAC token verification in `/api/generate-reading.js`.
+- Bypass activates ONLY when BOTH `process.env.NODE_ENV === "development"` AND `process.env.DEV_BYPASS === "true"`.
+- When active, skips HMAC token verification but continues using the selected provider (templateProvider or geminiProvider) for reading generation.
+- Production behavior remains completely unchanged - token verification is always enforced when bypass conditions are not met.
+- Clear comments added explaining this bypass exists ONLY for local development and MUST NOT be enabled in production.
+- If DEV_BYPASS is not true, existing security behaves exactly as before.
+
+Env vars now required:
+- `INSTAMOJO_API_KEY`
+- `INSTAMOJO_AUTH_TOKEN`
+- `TOKEN_SECRET`
+- `AI_READING` (optional, toggle for AI provider)
+- `GEMINI_API_KEY` (required for live AI readings)
+- `NODE_ENV` (development/production)
+- `DEV_BYPASS` (optional, "true" to enable dev bypass)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
+---
+
 ### Phase 4 — Gemini Provider Preparation — 2026-08-05
 Files modified:
 - `providers/geminiProvider.js`
@@ -347,3 +403,54 @@ Deviations from spec, if any:
 - None.
 
 What's next: Phase 4 — Trust & compliance pages (`refund-policy.html`, `privacy.html`).
+
+---
+
+### Phase — Direct UPI payment migration (Instamojo removed) — 2026-08-08
+Files created/modified:
+- `api/create-payment.js` — rewritten as a direct UPI payment-intent endpoint
+- `api/verify-payment.js` — rewritten as the customer "I've paid" UTR submission
+- `api/admin-confirm-payment.js` — NEW owner-only token-mint endpoint
+- `js/checkout.js` — rewritten to render the UPI panel + UTR form
+- `index.html` — added UPI payment panel + updated CTA/honest copy
+- `css/style.css` — payment panel styles
+- `.env.example` — replaced Instamojo vars with UPI + admin secret vars
+- `scripts/verifyProductionChecks.js`, `scripts/verifyCustomerJourney.js` — rewritten for the new flow
+- `scripts/verifyUpiPaymentFlow.js` — NEW focused UPI flow test
+- `PROJECT_SPEC.md`, `.cursor/rules/project.mdc`, `PROGRESS.md` — docs updated
+
+Key decisions made:
+- Migrated from the Instamojo gateway to a **direct UPI flow** (`upi://pay` deep link, Google Pay / PhonePe / Paytm compatible). No PSP, no bank API, no gateway credentials.
+- Direct UPI provides **no server-side settlement callback**, so nothing can be auto-verified. The design therefore:
+  - `create-payment` returns a payment intent `{ upiId, amount, payeeName, note, orderId, deepLink }` and **never** mints a token.
+  - `verify-payment` records the customer's UTR claim (stateless acknowledgment) and **never** grants access.
+  - `admin-confirm-payment` is the **sole grant path**: the owner verifies the credit in their own UPI app, then calls it with `ADMIN_CONFIRM_SECRET` to mint the HMAC token for `/result.html`.
+- Order ID is generated server-side as `PP` + 10 random uppercase hex (12 chars, unguessable, within UPI `tid` limits) and reused as the deep link `tid` so the token binds to the real order.
+- Removed the old dev-bypass grant inside `create-payment` (it auto-minted tokens in dev, which contradicts the no-fake-grant rule). `generate-reading`'s dev bypass (`NODE_ENV=development` + `DEV_BYPASS=true`) remains as the only dev shortcut.
+- Price stays ₹49, now configurable via `PAYMENT_AMOUNT` (default 49) so the server is the single source of truth.
+- Token payload unchanged: `HMAC-SHA256([name, dob, birthplace, tradition, photoHash, orderId].join(':'), TOKEN_SECRET)` — `generate-reading` untouched.
+
+Security decisions:
+- `admin-confirm-payment` authenticates via constant-time comparison (`crypto.timingSafeEqual`) of `ADMIN_CONFIRM_SECRET`.
+- Strict input validation everywhere (100-char limits, DOB regex, tradition whitelist, photoHash = SHA-256 hex or empty, UTR = 8–16 alphanumeric, orderId format check).
+- No PII in the deep link; order ID, token and photo hash never leak into logs.
+
+Env vars now required:
+- `PAYMENT_UPI_ID` (required — payee UPI ID/VPA)
+- `TOKEN_SECRET` (required — HMAC signing)
+- `ADMIN_CONFIRM_SECRET` (required — owner confirmation key)
+- Optional: `PAYMENT_AMOUNT` (default 49), `PAYMENT_PAYEE_NAME` (default "PalmPyaar"), `PAYMENT_NOTE` (default "PalmPyaar Reading"), `AI_READING` + `GROQ_API_KEY`/`GEMINI_API_KEY`
+- Dev only: `NODE_ENV=development`, `DEV_BYPASS=true`
+
+Tests (all passing):
+- `scripts/verifyUpiPaymentFlow.js` (8 checks) — deep link format, orderId uniqueness, token binding/determinism, no-auto-grant, hygiene (no Instamojo/paymentUrl/auto-grant in active code, env contract)
+- `scripts/verifyProductionChecks.js` (29 checks) — validation, UPI config errors, intent contract, UTR submission never grants, admin-confirm auth/token, generate-reading gate, round-trip, no auto-grant
+- `scripts/verifyCustomerJourney.js` (8 checks) — full customer journey: intent → UTR claim → owner confirm → reading
+- `scripts/verifyProductionPath.js` (9 checks) — reading pipeline + token gate (orderId style updated)
+
+Deviations from spec, if any:
+- Payment is now direct UPI (spec Section 7a Instamojo plan superseded — marked in PROJECT_SPEC.md).
+- Phase 2 spec updated to the new flow; env var list in Section 9 updated.
+- Pre-existing failures in `scripts/testPalmEvidenceIntegrity.js` (7/13) and `scripts/testOpeningLibrary.js` (1/38) are unrelated to this migration (palm-evidence MODE B selection); not touched by this phase.
+
+What's next: Deploy — set `PAYMENT_UPI_ID`, `ADMIN_CONFIRM_SECRET`, `TOKEN_SECRET` in Vercel, then manually test the UPI flow on a phone.

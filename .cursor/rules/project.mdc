@@ -45,7 +45,11 @@ No database.
 
 Payment:
 
-Instamojo.
+Direct UPI only (upi:// deep link; Google Pay / PhonePe / Paytm compatible).
+
+No PSP or bank API.
+
+No automatic payment verification; the owner confirms manually via ADMIN_CONFIRM_SECRET and mints the access token.
 
 Reading generation:
 

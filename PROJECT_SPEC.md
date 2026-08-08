@@ -42,7 +42,7 @@ PalmPyaar is a no-signup, static entertainment website. Users enter DOB, birthpl
 - **Backend:** Vercel Serverless Functions only, in `/api`, Node.js.
 - **No database.** All state travels in a signed URL token (Phase 3).
 - **Hosting:** Vercel, deployed from a GitHub repo (connect once in Vercel dashboard, auto-deploys on push). No custom domain yet — ship on the free `*.vercel.app` URL; a domain can be attached later with zero code changes. See Section 1 for the Hobby-plan commercial-use caveat.
-- **Payment:** Instamojo Payment Requests API. See Section 7a for account setup.
+- **Payment:** direct UPI (no PSP/bank API) — payee UPI ID (`PAYMENT_UPI_ID`) with a `upi://` deep link (Google Pay/PhonePe/Paytm compatible). Customer pays and submits the UTR; the owner confirms manually and mints the access token. Supersedes the original Instamojo plan in Section 7a (kept for reference only).
 - **Reading generation:** template-based by default; optional free LLM path via Google Gemini's free tier (Section 7b) behind an `AI_READING` flag, with automatic fallback to templates on any error or quota limit — the user should never see a raw API failure.
 
 ---
@@ -127,7 +127,9 @@ Checkout switches the panel background to `--ivory`; price, what's included, and
 
 ## 7. Account setup — do this before Phase 2 (7a) and before Phase 3 if using AI readings (7b)
 
-### 7a. Instamojo — payment account + API keys
+### 7a. ~~Instamojo — payment account + API keys~~ (SUPERSEDED — direct UPI)
+
+> **Payment was migrated from Instamojo to a direct UPI flow** (Google Pay / PhonePe / Paytm) with owner-confirmed access. No PSP account, KYC, or API keys are needed anymore. See the latest phase in PROGRESS.md. The Instamojo setup steps below are kept for historical reference only and are no longer required.
 
 1. Go to instamojo.com and sign up with your email/phone — individual account, no company or GST needed.
 2. Verify your email and phone number.
@@ -163,11 +165,12 @@ Genuinely free, no credit card — this is why it's the default for `AI_READING=
 - Mobile-first. Test the layout at 375px width minimum before calling this phase done.
 - **Stop. Output the Section 11 summary.**
 
-### Phase 2 — Payment integration
-- Confirm Section 7a is complete (real or sandbox Instamojo credentials exist) before starting.
-- `/api/create-payment.js`: accepts `{name, dob, birthplace, tradition, photoHash}`, calls the Instamojo Payment Requests API, returns the Instamojo-hosted checkout URL. Pass those fields through Instamojo's `redirect_url` param so they come back on return; Instamojo also collects the buyer's email/phone at checkout — no separate form needed for that.
-- `/api/verify-payment.js`: on return from Instamojo, calls Instamojo's Payment Detail API **server-side** with the private API key to confirm `status === "Credit"`. Never trust the redirect's query params alone — they can be typed into a browser by hand.
-- On confirmed payment: compute `token = HMAC-SHA256(name+dob+birthplace+tradition+photoHash+tier+orderId, TOKEN_SECRET)`.
+### Phase 2 — Payment integration (migrated to direct UPI)
+- Supersedes the old Section 7a plan: no PSP account or Instamojo credentials needed. Set `PAYMENT_UPI_ID` (plus optional `PAYMENT_AMOUNT`, `PAYMENT_PAYEE_NAME`, `PAYMENT_NOTE`) and `ADMIN_CONFIRM_SECRET` in Vercel env.
+- `/api/create-payment.js`: accepts `{name, dob, birthplace, tradition, photoHash}`, returns a UPI payment intent `{upiId, amount, payeeName, note, orderId, deepLink}` where `deepLink` is `upi://pay?pa=...&pn=...&am=...&cu=INR&tn=...&tid=<orderId>` (opens Google Pay / PhonePe / Paytm). The order ID is generated server-side (`PP` + 10 random hex) and reused as the UPI `tid`. This endpoint NEVER mints a token.
+- The customer pays in their UPI app, then submits the transaction reference (UTR) to `/api/verify-payment.js`. This records the claim and NEVER grants access — direct UPI has no server-side settlement callback, so nothing is auto-verified.
+- The owner verifies the credit in their own UPI app, then calls `/api/admin-confirm-payment.js` (with the `ADMIN_CONFIRM_SECRET`) to mint the HMAC access token. This is the SOLE grant path.
+- On confirmed payment: compute `token = HMAC-SHA256(name+dob+birthplace+tradition+photoHash+orderId, TOKEN_SECRET)`.
 - Redirect to `/result.html?name=...&dob=...&...&token=...`.
 - **Stop. Output the Section 11 summary.**
 
@@ -198,10 +201,15 @@ Genuinely free, no credit card — this is why it's the default for `AI_READING=
 ## 9. Environment variables (names only — real values go in the Vercel dashboard, never in code or git)
 
 ```
-INSTAMOJO_API_KEY
-INSTAMOJO_AUTH_TOKEN
-TOKEN_SECRET
-GEMINI_API_KEY     
+PAYMENT_UPI_ID          # required — payee UPI ID (VPA)
+PAYMENT_AMOUNT          # integer rupees, default 49
+PAYMENT_PAYEE_NAME      # default "PalmPyaar"
+PAYMENT_NOTE            # default "PalmPyaar Reading"
+TOKEN_SECRET            # required — HMAC signing of reading tokens
+ADMIN_CONFIRM_SECRET    # required — owner-only key to confirm UPI payments
+AI_READING              # "false" (template) or "true" (AI provider)
+GROQ_API_KEY            # optional, AI provider
+GEMINI_API_KEY          # optional, AI provider
 ```
 
 ---

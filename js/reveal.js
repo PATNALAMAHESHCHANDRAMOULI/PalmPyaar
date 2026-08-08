@@ -137,10 +137,18 @@
         return res.json();
       })
       .then(function (data) {
+        console.log("SERVER RESPONSE:", data);
+        console.log("loadingEl:", loadingEl);
+        console.log("contentEl:", contentEl);
+        console.log("section-core:", document.getElementById("section-core"));
+        console.log("section-love:", document.getElementById("section-love"));
+        console.log("section-pro:", document.getElementById("section-pro"));
         // Step 4: Display reading data ONLY after a successful server response
         if (data && data.success) {
           var readingData = data.reading || getPlaceholderData(name, dob, birthplace, tradition);
+          console.log("About to render reading...");
           renderReading(name, dob, birthplace, tradition, readingData);
+          console.log("Render completed.");
 
           if (loadingEl) loadingEl.hidden = true;
           if (contentEl) {
@@ -151,7 +159,8 @@
           throw new Error('Invalid token response');
         }
       })
-      .catch(function () {
+      .catch(function (err) {
+        console.error("REVEAL ERROR:", err);
         // Step 5: If verification fails, show the Access Denied screen
         if (loadingEl) loadingEl.hidden = true;
         if (contentEl) contentEl.hidden = true;
@@ -159,9 +168,24 @@
       });
   }
 
+  function initPageReveal() {
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      document.body.classList.add('is-ready');
+      return;
+    }
+    requestAnimationFrame(function () {
+      document.body.classList.add('is-ready');
+    });
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', function () {
+      init();
+      initPageReveal();
+    });
   } else {
     init();
+    initPageReveal();
   }
 })();

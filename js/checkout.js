@@ -1,6 +1,11 @@
 /**
  * PalmPyaar checkout — collects form inputs, validates, calls /api/create-payment
- * and redirects to Instamojo checkout URL.
+ * and renders the direct UPI payment panel (Google Pay / PhonePe / Paytm deep link,
+ * UPI ID copy, and the "I've paid" UTR submission form).
+ *
+ * Direct UPI has no automatic server confirmation, so this flow NEVER grants access.
+ * The customer submits their UTR and the owner confirms manually via
+ * /api/admin-confirm-payment, which mints the token for /result.html.
  */
 (function () {
   'use strict';
@@ -8,6 +13,9 @@
   var unlockBtn = null;
   var checkoutError = null;
   var form = null;
+  var ctaBlock = null;
+  var panel = null;
+  var currentOrderId = '';
 
   function setError(message) {
     if (!checkoutError) {
@@ -68,16 +76,115 @@
     };
   }
 
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function setUtrStatus(message, isError) {
+    var status = $('payment-utr-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.hidden = !message;
+    status.setAttribute('role', isError ? 'alert' : 'status');
+    status.setAttribute('data-state', isError ? 'error' : 'success');
+  }
+
+  function copyUpiId() {
+    var upiIdEl = $('payment-upi-id');
+    if (!upiIdEl || !upiIdEl.textContent) return;
+    var text = upiIdEl.textContent.trim();
+
+    function copied() {
+      var btn = $('payment-copy-btn');
+      if (btn) {
+        var original = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        setTimeout(function () { btn.textContent = original; }, 1600);
+      }
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(copied, function () {
+        fallbackCopy(text, copied);
+      });
+    } else {
+      fallbackCopy(text, copied);
+    }
+  }
+
+  function fallbackCopy(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'absolute';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      done();
+    } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+  }
+
+  function showPaymentPanel(payment) {
+    currentOrderId = payment.orderId;
+
+    if (form) form.hidden = true;
+    if ($('teaser-flow')) $('teaser-flow').hidden = true;
+    if ($('teaser-reveal')) $('teaser-reveal').hidden = true;
+    if (ctaBlock) ctaBlock.hidden = true;
+
+    if (panel) panel.hidden = false;
+
+    var amountEl = $('payment-amount');
+    if (amountEl) amountEl.textContent = '\u20B9' + payment.amount;
+
+    var payeeEl = $('payment-payee');
+    if (payeeEl) payeeEl.textContent = payment.payeeName;
+
+    var upiIdEl = $('payment-upi-id');
+    if (upiIdEl) upiIdEl.textContent = payment.upiId;
+
+    var deepLinkBtn = $('payment-deeplink-btn');
+    if (deepLinkBtn) {
+      deepLinkBtn.href = payment.deepLink;
+      deepLinkBtn.target = '_blank';
+    }
+
+    setUtrStatus('', false);
+    var utrInput = $('payment-utr-input');
+    if (utrInput) utrInput.value = '';
+
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function backToForm() {
+    currentOrderId = '';
+    if (panel) panel.hidden = true;
+    if (form) form.hidden = false;
+    if ($('teaser-flow')) $('teaser-flow').hidden = false;
+    if ($('teaser-reveal')) $('teaser-reveal').hidden = false;
+    if (ctaBlock) ctaBlock.hidden = false;
+  }
+
+  function resetUnlockButton(originalBtnText) {
+    if (unlockBtn) {
+      unlockBtn.disabled = false;
+      unlockBtn.textContent = originalBtnText;
+    }
+  }
+
   function startCheckout() {
     var data = validateInputs();
     if (!data) return;
 
-    if (!unlockBtn) unlockBtn = document.getElementById('unlock-btn');
-    var originalBtnText = unlockBtn ? unlockBtn.textContent : 'Unlock full reading — ₹49';
+    if (!unlockBtn) unlockBtn = $('unlock-btn');
+    var originalBtnText = unlockBtn ? unlockBtn.textContent : 'Unlock full reading';
 
     if (unlockBtn) {
       unlockBtn.disabled = true;
-      unlockBtn.textContent = 'Connecting to payment gateway…';
+      unlockBtn.textContent = 'Preparing UPI payment…';
     }
 
     fetch('/api/create-payment', {
@@ -93,40 +200,80 @@
         });
       })
       .then(function (res) {
-        if (res.body && res.body.success && res.body.paymentUrl) {
-          window.location.href = res.body.paymentUrl;
+        if (res.body && res.body.success && res.body.payment) {
+          showPaymentPanel(res.body.payment);
         } else {
           var errorMsg = (res.body && res.body.error) || 'Payment initialization failed. Please try again.';
           setError(errorMsg);
-          if (unlockBtn) {
-            unlockBtn.disabled = false;
-            unlockBtn.textContent = originalBtnText;
-          }
+          resetUnlockButton(originalBtnText);
         }
       })
-      .catch(function (err) {
+      .catch(function () {
         setError('Network error connecting to payment server. Please check your connection.');
-        if (unlockBtn) {
-          unlockBtn.disabled = false;
-          unlockBtn.textContent = originalBtnText;
+        resetUnlockButton(originalBtnText);
+      });
+  }
+
+  function submitUtr(e) {
+    if (e) e.preventDefault();
+    setUtrStatus('', false);
+
+    var utrInput = $('payment-utr-input');
+    var submitBtn = $('payment-utr-submit');
+    if (!utrInput || !currentOrderId) return;
+
+    var utr = utrInput.value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{8,16}$/.test(utr)) {
+      setUtrStatus('Please enter the 12-character UPI transaction reference (letters and numbers only).', true);
+      utrInput.focus();
+      return;
+    }
+
+    var originalText = submitBtn ? submitBtn.textContent : '';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting…';
+    }
+
+    fetch('/api/verify-payment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ orderId: currentOrderId, utr: utr })
+    })
+      .then(function (response) {
+        return response.json().then(function (json) {
+          return { status: response.status, body: json };
+        });
+      })
+      .then(function (res) {
+        if (res.body && res.body.success) {
+          setUtrStatus(res.body.message || 'Payment claim received. Awaiting manual confirmation for your permanent link.', false);
+          utrInput.value = '';
+        } else {
+          setUtrStatus((res.body && res.body.error) || 'Could not submit your payment claim. Please try again.', true);
+        }
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }
+      })
+      .catch(function () {
+        setUtrStatus('Network error. Please check your connection and try again.', true);
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
         }
       });
   }
 
-  function checkUrlParams() {
-    var params = new URLSearchParams(window.location.search);
-    var paymentStatus = params.get('payment');
-    if (paymentStatus === 'failed') {
-      setError('Payment was not completed. Please try again to unlock your full reading.');
-    } else if (paymentStatus === 'missing_params' || paymentStatus === 'error') {
-      setError('Payment verification encountered an issue. Please try again.');
-    }
-  }
-
   function init() {
-    unlockBtn = document.getElementById('unlock-btn');
-    checkoutError = document.getElementById('checkout-error');
-    form = document.getElementById('reading-form');
+    unlockBtn = $('unlock-btn');
+    checkoutError = $('checkout-error');
+    form = $('reading-form');
+    ctaBlock = $('cta-block');
+    panel = $('payment-panel');
 
     if (unlockBtn) {
       unlockBtn.addEventListener('click', function (e) {
@@ -135,7 +282,26 @@
       });
     }
 
-    checkUrlParams();
+    var copyBtn = $('payment-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        copyUpiId();
+      });
+    }
+
+    var utrForm = $('payment-utr-form');
+    if (utrForm) {
+      utrForm.addEventListener('submit', submitUtr);
+    }
+
+    var backBtn = $('payment-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        backToForm();
+      });
+    }
   }
 
   window.PalmCheckout = {

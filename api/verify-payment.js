@@ -1,109 +1,61 @@
-const crypto = require('crypto');
-
 /**
- * Vercel Serverless Function: GET /api/verify-payment
- * Called via redirect from Instamojo with query params:
- * payment_id, payment_request_id, payment_status, name, dob, birthplace, tradition, photoHash
- * Calls Instamojo Payment Detail API server-side to confirm payment status === "Credit"
- * On success, generates HMAC-SHA256 token and redirects to /result.html
+ * Vercel Serverless Function: POST /api/verify-payment
+ *
+ * Replaces the previous gateway callback handling with the DIRECT UPI flow.
+ * There is no gateway redirect anymore: the customer pays the UPI
+ * deep link directly in their UPI app and returns here with their
+ * transaction reference (UTR).
+ *
+ * Accepts { orderId, utr }:
+ *   - orderId: the order id returned by /api/create-payment (matches the UPI tid)
+ *   - utr:     the UPI transaction reference shown in the customer's UPI app
+ *
+ * Returns a confirmation with instructions.
+ *
+ * SECURITY: Direct UPI provides NO server-side settlement callback, so this
+ * endpoint CANNOT and DOES NOT verify the payment or grant access. It only
+ * records the customer's claim (stateless acknowledgment) and instructs them
+ * to share the UTR with the owner. The SOLE grant path is
+ * /api/admin-confirm-payment, which only the owner may call AFTER manually
+ * confirming the credit in their own UPI app.
  */
 module.exports = async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', ['GET']);
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
   try {
-    const query = req.query || {};
-    const paymentId = query.payment_id;
-    const paymentRequestId = query.payment_request_id;
-    let name = query.name || '';
-    const dob = query.dob || '';
-    let birthplace = query.birthplace || '';
-    const tradition = query.tradition || 'western';
-    const photoHash = query.photoHash || '';
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    let orderId = String(body.orderId || '').trim();
+    let utr = String(body.utr || '').trim();
 
-    // Security Decision: Require mandatory payment parameters passed back from gateway.
-    if (!paymentId || !paymentRequestId) {
-      const redirectFailed = `/index.html?payment=missing_params`;
-      res.writeHead(302, { Location: redirectFailed });
-      return res.end();
+    // Security Decision: Strict format checks to prevent injection / log poisoning.
+    if (!orderId || !/^[A-Za-z0-9_-]{4,32}$/.test(orderId)) {
+      return res.status(400).json({ success: false, error: 'A valid order id is required.' });
     }
 
-    // Security Decision: Validate and sanitize input strings with a 100-character max limit
-    // to prevent parameter manipulation, log injection, or token bloating.
-    name = String(name).trim().replace(/[\r\n\t]/g, ' ').slice(0, 100);
-    birthplace = String(birthplace).trim().replace(/[\r\n\t]/g, ' ').slice(0, 100);
-
-    // Security Decision: Remove default TOKEN_SECRET fallback. Require TOKEN_SECRET environment variable;
-    // fail securely with a server configuration error if unconfigured to prevent forged signatures.
-    const secret = process.env.TOKEN_SECRET;
-    if (!secret) {
-      const errorUrl = `/index.html?payment=config_error`;
-      res.writeHead(302, { Location: errorUrl });
-      return res.end();
-    }
-
-    // Security Decision: Mandate server API credentials for authenticating requests to Instamojo.
-    const apiKey = process.env.INSTAMOJO_API_KEY;
-    const authToken = process.env.INSTAMOJO_AUTH_TOKEN;
-    const instamojoHost = process.env.INSTAMOJO_HOST || (process.env.INSTAMOJO_LIVE === 'true' ? 'www.instamojo.com' : 'test.instamojo.com');
-
-    if (!apiKey || !authToken) {
-      const failedUrl = `/index.html?payment=config_error`;
-      res.writeHead(302, { Location: failedUrl });
-      return res.end();
-    }
-
-    let paymentVerified = false;
-    let verifiedOrderId = paymentId;
-
-    // Security Decision: Use AbortController with a 10-second timeout to prevent serverless function hangs on slow gateway calls.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    try {
-      const verifyEndpoint = `https://${instamojoHost}/api/1.1/payment-requests/${paymentRequestId}/${paymentId}/`;
-      const verifyResponse = await fetch(verifyEndpoint, {
-        method: 'GET',
-        headers: {
-          'X-Api-Key': apiKey,
-          'X-Auth-Token': authToken
-        },
-        signal: controller.signal
+    // UPI UTRs are short alphanumeric references (commonly 12 chars).
+    // Accept 8-16 alphanumeric chars to avoid false rejections across apps/banks.
+    utr = utr.toUpperCase();
+    if (!/^[A-Z0-9]{8,16}$/.test(utr)) {
+      return res.status(400).json({
+        success: false,
+        error: 'The UTR should be the 12-character UPI transaction reference (letters and numbers only).'
       });
-
-      if (verifyResponse.ok) {
-        const data = await verifyResponse.json();
-        // Security Decision: Verify strictly against documented successful payment status ("Credit").
-        // Reject all unverified, pending, or fallback states to prevent paywall bypass.
-        if (data && data.success && data.payment_request && data.payment_request.payment) {
-          if (data.payment_request.payment.status === 'Credit') {
-            paymentVerified = true;
-          }
-        }
-      }
-    } finally {
-      clearTimeout(timeoutId);
     }
 
-    if (!paymentVerified) {
-      const failedUrl = `/index.html?payment=failed`;
-      res.writeHead(302, { Location: failedUrl });
-      return res.end();
-    }
-
-    // Security Decision: Compute HMAC-SHA256 signature using secret over verified order ID and user parameters.
-    const rawPayload = [name, dob, birthplace, tradition, photoHash, verifiedOrderId].join(':');
-    const token = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex');
-
-    const resultUrl = `/result.html?name=${encodeURIComponent(name)}&dob=${encodeURIComponent(dob)}&birthplace=${encodeURIComponent(birthplace)}&tradition=${encodeURIComponent(tradition)}&photoHash=${encodeURIComponent(photoHash)}&orderId=${encodeURIComponent(verifiedOrderId)}&token=${token}`;
-
-    res.writeHead(302, { Location: resultUrl });
-    return res.end();
+    return res.status(200).json({
+      success: true,
+      submitted: true,
+      orderId,
+      message: 'Payment claim received. PalmPyaar confirms payments manually — if we have any question we will reach out with your UTR. Once confirmed, your permanent reading link will be sent to you.'
+    });
   } catch (err) {
-    const errorUrl = `/index.html?payment=error`;
-    res.writeHead(302, { Location: errorUrl });
-    return res.end();
+    console.error('[verify-payment] error:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Could not submit your payment claim. Please try again.'
+    });
   }
 };

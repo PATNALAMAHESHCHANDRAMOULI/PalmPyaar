@@ -58,18 +58,13 @@ async function generateReading({ name, dob, birthplace, tradition, photoHash }) 
   const tradName = capitalize(tradition) || 'Western';
   const displayName = name || 'Seeker';
   const displayLocation = birthplace || 'your place of birth';
-  const hasPhoto = photoHash && photoHash.length > 0;
 
   const safeName = escapeHtml(displayName);
   const safeLocation = escapeHtml(displayLocation);
   const safeTradition = escapeHtml(tradName);
 
-  const photoNote = hasPhoto
-    ? ' Your locally hashed palm image aligns with a rare double-loop heart line pattern.'
-    : '';
-
   const core = `
-    <p class="reading-paragraph">Your birth configuration in <strong>${safeLocation}</strong> under the <strong>${safeTradition}</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>${sign}</strong>, your palm signature indicates high resilience and reflective depth.${photoNote}</p>
+    <p class="reading-paragraph">Your birth configuration in <strong>${safeLocation}</strong> under the <strong>${safeTradition}</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>${sign}</strong>, your palm signature indicates high resilience and reflective depth.</p>
     <p class="reading-paragraph">The subtle curves of your headline suggest a mind that processes experiences thoroughly before taking decisive action. You often notice details others overlook, giving you an understated advantage in long-term endeavors.</p>
   `.trim();
 
