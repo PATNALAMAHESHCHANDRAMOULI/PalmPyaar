@@ -126,19 +126,24 @@
       teaserSection.classList.add('is-visible');
     });
 
-    if (unlockBtn) {
-      unlockBtn.disabled = false;
-      unlockBtn.setAttribute('aria-disabled', 'false');
-    }
+    updateUnlockState();
   }
 
   function hideTeaser() {
     if (!teaserSection) return;
     teaserSection.classList.remove('is-visible');
     teaserSection.hidden = true;
-    if (unlockBtn) {
-      unlockBtn.disabled = true;
-      unlockBtn.setAttribute('aria-disabled', 'true');
+    updateUnlockState();
+  }
+
+  function updateUnlockState() {
+    if (!unlockBtn) return;
+    var teaserVisible = teaserSection && !teaserSection.hidden;
+    var canUnlock = !!currentPhotoHash && !!teaserVisible;
+    unlockBtn.disabled = !canUnlock;
+    unlockBtn.setAttribute('aria-disabled', String(!canUnlock));
+    if (photoStatus && !currentPhotoHash && teaserVisible) {
+      setPhotoStatus('A hand photo is required to unlock your reading.', 'error');
     }
   }
 
@@ -176,8 +181,8 @@
     var file = event.target.files && event.target.files[0];
     if (!file) {
       currentPhotoHash = '';
-      setPhotoStatus('Optional — hashed on your device, never uploaded.', 'idle');
-      if (photoLabelText) photoLabelText.textContent = 'Add a photo';
+      setPhotoStatus('A hand photo is required to unlock your reading.', 'error');
+      if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
       return;
     }
@@ -185,23 +190,23 @@
     if (!file.type.startsWith('image/')) {
       event.target.value = '';
       currentPhotoHash = '';
-      setPhotoStatus('Please choose an image file.', 'error');
-      if (photoLabelText) photoLabelText.textContent = 'Add a photo';
+      setPhotoStatus('Please choose an image file of your hand.', 'error');
+      if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
       return;
     }
 
-    setPhotoStatus('Hashing on your device…', 'loading');
+    setPhotoStatus('Hashing on your device\u2026', 'loading');
     if (photoLabelText) photoLabelText.textContent = file.name;
 
     hashPhoto(file).then(function (hash) {
       currentPhotoHash = hash;
-      setPhotoStatus('Photo hashed locally — never uploaded.', 'success');
+      setPhotoStatus('Hand photo hashed locally \u2014 never uploaded.', 'success');
       updateTeaser();
     }).catch(function () {
       currentPhotoHash = '';
-      setPhotoStatus('Could not hash photo. Try another image.', 'error');
-      if (photoLabelText) photoLabelText.textContent = 'Add a photo';
+      setPhotoStatus('Could not hash your photo. Try another image.', 'error');
+      if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
     });
   }

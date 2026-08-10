@@ -1,11 +1,12 @@
 /**
  * PalmPyaar checkout — collects form inputs, validates, calls /api/create-payment
- * and renders the direct UPI payment panel (Google Pay / PhonePe / Paytm deep link,
- * UPI ID copy, and the "I've paid" UTR submission form).
+ * to create a REAL Razorpay Order, opens the Razorpay Checkout modal, and after a
+ * successful payment sends the Razorpay response to /api/verify-razorpay so the
+ * server can verify the payment signature and mint the access token.
  *
- * Direct UPI has no automatic server confirmation, so this flow NEVER grants access.
- * The customer submits their UTR and the owner confirms manually via
- * /api/admin-confirm-payment, which mints the token for /result.html.
+ * The frontend NEVER decides whether a payment succeeded. /api/verify-razorpay
+ * verifies the Razorpay signature with RAZORPAY_KEY_SECRET before granting
+ * access, so a forged "payment success" cannot unlock a reading.
  */
 (function () {
   'use strict';
@@ -13,13 +14,18 @@
   var unlockBtn = null;
   var checkoutError = null;
   var form = null;
-  var ctaBlock = null;
-  var panel = null;
   var currentOrderId = '';
+  var currentStateToken = '';
+  var rzpInstance = null;
+  var DEFAULT_BTN_TEXT = 'Unlock full reading \u2014 \u20B949';
+
+  function $(id) {
+    return document.getElementById(id);
+  }
 
   function setError(message) {
     if (!checkoutError) {
-      checkoutError = document.getElementById('checkout-error');
+      checkoutError = $('checkout-error');
     }
     if (!checkoutError) return;
 
@@ -34,7 +40,7 @@
   }
 
   function validateInputs() {
-    if (!form) form = document.getElementById('reading-form');
+    if (!form) form = $('reading-form');
     if (!form) return null;
 
     var name = (form.name ? form.name.value : '').trim();
@@ -66,6 +72,13 @@
       return null;
     }
 
+    if (!photoHash) {
+      setError('A hand photo is required before you can unlock your reading. Please add your palm photo.');
+      var photoInput = form.querySelector('#photo');
+      if (photoInput) photoInput.focus();
+      return null;
+    }
+
     setError('');
     return {
       name: name,
@@ -76,102 +89,113 @@
     };
   }
 
-  function $(id) {
-    return document.getElementById(id);
-  }
-
-  function setUtrStatus(message, isError) {
-    var status = $('payment-utr-status');
-    if (!status) return;
-    status.textContent = message || '';
-    status.hidden = !message;
-    status.setAttribute('role', isError ? 'alert' : 'status');
-    status.setAttribute('data-state', isError ? 'error' : 'success');
-  }
-
-  function copyUpiId() {
-    var upiIdEl = $('payment-upi-id');
-    if (!upiIdEl || !upiIdEl.textContent) return;
-    var text = upiIdEl.textContent.trim();
-
-    function copied() {
-      var btn = $('payment-copy-btn');
-      if (btn) {
-        var original = btn.textContent;
-        btn.textContent = 'Copied ✓';
-        setTimeout(function () { btn.textContent = original; }, 1600);
-      }
-    }
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(copied, function () {
-        fallbackCopy(text, copied);
-      });
-    } else {
-      fallbackCopy(text, copied);
+  function setButtonBusy(text) {
+    if (unlockBtn) {
+      unlockBtn.disabled = true;
+      unlockBtn.setAttribute('aria-disabled', 'true');
+      unlockBtn.textContent = text || DEFAULT_BTN_TEXT;
     }
   }
 
-  function fallbackCopy(text, done) {
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'absolute';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      document.execCommand('copy');
-      done();
-    } catch (e) { /* ignore */ }
-    document.body.removeChild(ta);
-  }
-
-  function showPaymentPanel(payment) {
-    currentOrderId = payment.orderId;
-
-    if (form) form.hidden = true;
-    if ($('teaser-flow')) $('teaser-flow').hidden = true;
-    if ($('teaser-reveal')) $('teaser-reveal').hidden = true;
-    if (ctaBlock) ctaBlock.hidden = true;
-
-    if (panel) panel.hidden = false;
-
-    var amountEl = $('payment-amount');
-    if (amountEl) amountEl.textContent = '\u20B9' + payment.amount;
-
-    var payeeEl = $('payment-payee');
-    if (payeeEl) payeeEl.textContent = payment.payeeName;
-
-    var upiIdEl = $('payment-upi-id');
-    if (upiIdEl) upiIdEl.textContent = payment.upiId;
-
-    var deepLinkBtn = $('payment-deeplink-btn');
-    if (deepLinkBtn) {
-      deepLinkBtn.href = payment.deepLink;
-      deepLinkBtn.target = '_blank';
-    }
-
-    setUtrStatus('', false);
-    var utrInput = $('payment-utr-input');
-    if (utrInput) utrInput.value = '';
-
-    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  function backToForm() {
-    currentOrderId = '';
-    if (panel) panel.hidden = true;
-    if (form) form.hidden = false;
-    if ($('teaser-flow')) $('teaser-flow').hidden = false;
-    if ($('teaser-reveal')) $('teaser-reveal').hidden = false;
-    if (ctaBlock) ctaBlock.hidden = false;
-  }
-
-  function resetUnlockButton(originalBtnText) {
+  function resetUnlockButton() {
     if (unlockBtn) {
       unlockBtn.disabled = false;
-      unlockBtn.textContent = originalBtnText;
+      unlockBtn.setAttribute('aria-disabled', 'false');
+      unlockBtn.textContent = DEFAULT_BTN_TEXT;
+    }
+  }
+
+  function loadRazorpayScript() {
+    return new Promise(function (resolve, reject) {
+      if (window.Razorpay) {
+        resolve(window.Razorpay);
+        return;
+      }
+      var script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = function () {
+        if (window.Razorpay) resolve(window.Razorpay);
+        else reject(new Error('Razorpay Checkout did not load. Please try again.'));
+      };
+      script.onerror = function () {
+        reject(new Error('Could not load the Razorpay payment gateway. Please check your connection and try again.'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  function verifyPayment(response, data) {
+    setButtonBusy('Verifying your payment\u2026');
+
+    fetch('/api/verify-razorpay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: data.name,
+        dob: data.dob,
+        birthplace: data.birthplace,
+        tradition: data.tradition,
+        photoHash: data.photoHash,
+        orderId: currentOrderId,
+        stateToken: currentStateToken,
+        razorpayOrderId: response.razorpay_order_id,
+        razorpayPaymentId: response.razorpay_payment_id,
+        razorpaySignature: response.razorpay_signature
+      })
+    })
+      .then(function (res) {
+        return res.json().then(function (json) {
+          return { status: res.status, body: json };
+        });
+      })
+      .then(function (res) {
+        if (res.body && res.body.success && res.body.resultUrl) {
+          window.location.href = res.body.resultUrl;
+        } else {
+          setError((res.body && res.body.error) || 'We could not verify your payment. Please try again.');
+          resetUnlockButton();
+        }
+      })
+      .catch(function () {
+        setError('Network error while verifying your payment. If you were charged, please contact support with your transaction reference.');
+        resetUnlockButton();
+      });
+  }
+
+  function openRazorpayCheckout(payment, data) {
+    var options = {
+      key: payment.keyId,
+      amount: payment.amountPaise,
+      currency: payment.currency || 'INR',
+      order_id: payment.razorpayOrderId,
+      name: 'PalmPyaar',
+      description: 'Personalized palm & zodiac reading',
+      prefill: { name: data.name },
+      theme: { color: '#B5555C' },
+      handler: function (response) {
+        verifyPayment(response, data);
+      },
+      modal: {
+        ondismiss: function () {
+          resetUnlockButton();
+        }
+      }
+    };
+
+    try {
+      rzpInstance = new window.Razorpay(options);
+      rzpInstance.on('payment.failed', function (resp) {
+        var detail = resp && resp.error && resp.error.description;
+        setError('Payment failed' + (detail ? ': ' + detail : '.') + ' You have not been charged. Please try again.');
+        resetUnlockButton();
+      });
+      rzpInstance.open();
+    } catch (err) {
+      setError('Could not open the payment window. Please try again.');
+      resetUnlockButton();
     }
   }
 
@@ -179,13 +203,8 @@
     var data = validateInputs();
     if (!data) return;
 
-    if (!unlockBtn) unlockBtn = $('unlock-btn');
-    var originalBtnText = unlockBtn ? unlockBtn.textContent : 'Unlock full reading';
-
-    if (unlockBtn) {
-      unlockBtn.disabled = true;
-      unlockBtn.textContent = 'Preparing UPI payment…';
-    }
+    setError('');
+    setButtonBusy('Preparing secure payment\u2026');
 
     fetch('/api/create-payment', {
       method: 'POST',
@@ -201,70 +220,24 @@
       })
       .then(function (res) {
         if (res.body && res.body.success && res.body.payment) {
-          showPaymentPanel(res.body.payment);
+          currentOrderId = res.body.payment.orderId;
+          currentStateToken = res.body.payment.stateToken;
+          loadRazorpayScript()
+            .then(function () {
+              openRazorpayCheckout(res.body.payment, data);
+            })
+            .catch(function (err) {
+              setError(err.message || 'Could not load the payment gateway. Please try again.');
+              resetUnlockButton();
+            });
         } else {
-          var errorMsg = (res.body && res.body.error) || 'Payment initialization failed. Please try again.';
-          setError(errorMsg);
-          resetUnlockButton(originalBtnText);
+          setError((res.body && res.body.error) || 'Payment initialization failed. Please try again.');
+          resetUnlockButton();
         }
       })
       .catch(function () {
-        setError('Network error connecting to payment server. Please check your connection.');
-        resetUnlockButton(originalBtnText);
-      });
-  }
-
-  function submitUtr(e) {
-    if (e) e.preventDefault();
-    setUtrStatus('', false);
-
-    var utrInput = $('payment-utr-input');
-    var submitBtn = $('payment-utr-submit');
-    if (!utrInput || !currentOrderId) return;
-
-    var utr = utrInput.value.trim().toUpperCase();
-    if (!/^[A-Z0-9]{8,16}$/.test(utr)) {
-      setUtrStatus('Please enter the 12-character UPI transaction reference (letters and numbers only).', true);
-      utrInput.focus();
-      return;
-    }
-
-    var originalText = submitBtn ? submitBtn.textContent : '';
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Submitting…';
-    }
-
-    fetch('/api/verify-payment', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ orderId: currentOrderId, utr: utr })
-    })
-      .then(function (response) {
-        return response.json().then(function (json) {
-          return { status: response.status, body: json };
-        });
-      })
-      .then(function (res) {
-        if (res.body && res.body.success) {
-          setUtrStatus(res.body.message || 'Payment claim received. Awaiting manual confirmation for your permanent link.', false);
-          utrInput.value = '';
-        } else {
-          setUtrStatus((res.body && res.body.error) || 'Could not submit your payment claim. Please try again.', true);
-        }
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = originalText;
-        }
-      })
-      .catch(function () {
-        setUtrStatus('Network error. Please check your connection and try again.', true);
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = originalText;
-        }
+        setError('Network error connecting to the payment server. Please check your connection.');
+        resetUnlockButton();
       });
   }
 
@@ -272,34 +245,11 @@
     unlockBtn = $('unlock-btn');
     checkoutError = $('checkout-error');
     form = $('reading-form');
-    ctaBlock = $('cta-block');
-    panel = $('payment-panel');
 
     if (unlockBtn) {
       unlockBtn.addEventListener('click', function (e) {
         e.preventDefault();
         startCheckout();
-      });
-    }
-
-    var copyBtn = $('payment-copy-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        copyUpiId();
-      });
-    }
-
-    var utrForm = $('payment-utr-form');
-    if (utrForm) {
-      utrForm.addEventListener('submit', submitUtr);
-    }
-
-    var backBtn = $('payment-back-btn');
-    if (backBtn) {
-      backBtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        backToForm();
       });
     }
   }

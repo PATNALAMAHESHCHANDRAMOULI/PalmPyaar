@@ -1,34 +1,92 @@
 const crypto = require('crypto');
+const stateToken = require('../lib/stateToken');
+const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
 
 /**
  * Vercel Serverless Function: POST /api/create-payment
  *
- * Replaces the previous third-party payment gateway with a DIRECT UPI
- * payment flow (no PSP / bank API).
+ * Creates a REAL Razorpay Order for the ₹49 PalmPyaar reading. This replaces
+ * the previous direct-UPI deep-link flow (no PSP callback).
  *
- * Accepts { name, dob, birthplace, tradition, photoHash } and returns a
- * payment instruction payload:
+ * Accepts { name, dob, birthplace, tradition, photoHash }.
+ * photoHash is REQUIRED: a client-side SHA-256 hex digest of the hand photo.
+ * The raw image is never uploaded; only the digest is transmitted.
+ *
+ * Returns:
  *   {
  *     success: true,
  *     payment: {
- *       upiId,          // PAYMENT_UPI_ID (the payee VPA)
- *       amount,         // PAYMENT_AMOUNT (integer rupees, default 49)
- *       payeeName,      // PAYMENT_PAYEE_NAME (default "PalmPyaar")
- *       note,           // PAYMENT_NOTE (default "PalmPyaar Reading")
- *       orderId,        // PP + 10 random hex chars (used as UPI tid)
- *       deepLink        // upi://pay?pa=...&pn=...&am=...&cu=INR&tn=...&tid=<orderId>
+ *       orderId,          // internal "PP" + 10 hex chars (Razorpay receipt + token binding)
+ *       razorpayOrderId,  // id returned by Razorpay POST /v1/orders
+ *       keyId,            // RAZORPAY_KEY_ID (public; required by Razorpay Checkout)
+ *       amount,           // rupees (PAYMENT_AMOUNT, default 49)
+ *       amountPaise,      // amount * 100 (Razorpay expects the smallest currency unit)
+ *       currency,         // "INR"
+ *       stateToken,       // short-lived server-signed binding of the EXACT reading
+ *                         // payload to razorpayOrderId (required at verification)
+ *       stateTokenTtlSeconds
  *     }
  *   }
  *
- * The upi:// deep link opens the customer's UPI app (Google Pay, PhonePe,
- * Paytm, etc.) for an inline payment to the configured VPA.
- *
- * SECURITY: This endpoint NEVER mints an access token and NEVER grants a
- * reading. Direct UPI gives no server-side settlement callback, so granting
- * without evidence is impossible by design. Only the owner can mint a token
- * via /api/admin-confirm-payment AFTER verifying the payment in their own
- * UPI app (see that handler for details).
+ * SECURITY (payment <-> reading binding):
+ *  - This endpoint cryptographically binds the EXACT reading payload
+ *    [name, dob, birthplace, tradition, photoHash, orderId] to the generated
+ *    Razorpay order via a short-lived HMAC state token signed with TOKEN_SECRET.
+ *  - /api/verify-razorpay later reads the reading data ONLY from that verified
+ *    token, so a paid order can never be replayed against modified reading data.
+ *  - RAZORPAY_KEY_SECRET lives server-side only and is NEVER returned to the
+ *    client. RAZORPAY_KEY_ID is public and safe to expose for the checkout.
+ *  - This endpoint NEVER mints an access/reading token. The ONLY grant path is
+ *    /api/verify-razorpay, which verifies the Razorpay payment signature
+ *    server-side before minting the reading token.
  */
+
+async function createRazorpayOrder({ amountPaise, receipt }) {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const auth = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: {
+        Authorization: auth,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        amount: amountPaise,
+        currency: 'INR',
+        receipt,
+        notes: { product: 'PalmPyaar Personalized Reading' }
+      }),
+      signal: controller.signal
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const detail = data && data.error && data.error.description
+        ? data.error.description
+        : 'HTTP ' + res.status;
+      const err = new Error('Razorpay order creation failed: ' + detail);
+      err.statusCode = 502;
+      throw err;
+    }
+
+    if (!data || !/^order_[A-Za-z0-9]+$/.test(String(data.id || ''))) {
+      const err = new Error('Razorpay returned an invalid order id.');
+      err.statusCode = 502;
+      throw err;
+    }
+
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -59,7 +117,7 @@ module.exports = async function handler(req, res) {
     }
 
     // Validate DOB format (YYYY-MM-DD)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dob))) {
       return res.status(400).json({ success: false, error: 'Invalid date of birth format.' });
     }
 
@@ -71,67 +129,110 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid reading tradition.' });
     }
 
-    // Security Decision: Photo hash must be the client-side SHA-256 hex digest
-    // (64 chars) or empty. The image itself is never uploaded.
+    // Security Decision: The hand photo is REQUIRED for the paid reading. The
+    // photoHash must be the client-side SHA-256 hex digest (64 chars). The raw
+    // image itself is never uploaded. Backend enforces presence so that
+    // frontend-only checks cannot be bypassed.
     const cleanPhotoHash = String(photoHash || '').trim().toLowerCase();
-    if (cleanPhotoHash && !/^[a-f0-9]{64}$/.test(cleanPhotoHash)) {
+    if (!cleanPhotoHash) {
+      return res.status(400).json({
+        success: false,
+        error: 'A hand photo is required. Provide the SHA-256 hash of your palm photo.'
+      });
+    }
+    if (!/^[a-f0-9]{64}$/.test(cleanPhotoHash)) {
       return res.status(400).json({ success: false, error: 'Invalid photo hash.' });
     }
 
-    // --- UPI configuration ---
-    const upiId = (process.env.PAYMENT_UPI_ID || '').trim().toLowerCase();
-    if (!upiId) {
+    // --- Razorpay configuration (key id public; key secret server-only) ---
+    const keyId = (process.env.RAZORPAY_KEY_ID || '').trim();
+    const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+    if (!keyId || !keySecret) {
       return res.status(500).json({
         success: false,
-        error: 'Server configuration error: PAYMENT_UPI_ID is missing. Set the payee UPI ID (VPA) in environment variables.'
+        error: 'Server configuration error: RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set in environment variables.'
       });
     }
 
-    const rawAmount = process.env.PAYMENT_AMOUNT || '49';
-    const amount = parseInt(rawAmount, 10);
-    if (!Number.isInteger(amount) || amount <= 0 || amount > 100000) {
+    // Security Decision: TOKEN_SECRET is required to sign the state token that
+    // binds the reading payload to the Razorpay order. Fails closed BEFORE any
+    // order is created so an unbound order can never be generated.
+    const tokenSecret = (process.env.TOKEN_SECRET || '').trim();
+    if (!tokenSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: TOKEN_SECRET is missing. It is required to bind the payment to the reading data.'
+      });
+    }
+
+    const amount = expectedAmountRupees();
+    if (amount === null) {
       return res.status(500).json({
         success: false,
         error: 'Server configuration error: PAYMENT_AMOUNT must be a positive integer (rupees) no larger than 100000.'
       });
     }
+    const amountPaise = amount * 100;
 
-    // UPI pn field is limited (~25 chars); keep payee name short and safe.
-    const payeeName = (process.env.PAYMENT_PAYEE_NAME || 'PalmPyaar').trim().replace(/[\r\n\t]/g, ' ').slice(0, 25);
-    const note = (process.env.PAYMENT_NOTE || 'PalmPyaar Reading').trim().replace(/[\r\n\t]/g, ' ').slice(0, 30);
-
-    // Security Decision: Order ID is generated server-side (never trusted from the
-    // client). Format "PP" + 10 random uppercase hex chars = 12 chars, well within
-    // the UPI tid limit, and unguessable so it can be bound into the access token.
+    // Security Decision: Internal order id is generated server-side (never
+    // trusted from the client). Format "PP" + 10 random uppercase hex chars =
+    // 12 chars, unguessable, and used as the Razorpay receipt + token binding.
     const orderId = 'PP' + crypto.randomBytes(5).toString('hex').toUpperCase();
 
-    // Build the Google Pay / UPI-app-compatible deep link (standard upi:// scheme).
-    const deepLinkParams = new URLSearchParams({
-      pa: upiId,
-      pn: payeeName,
-      am: String(amount),
-      cu: 'INR',
-      tn: note,
-      tid: orderId
-    });
-    const deepLink = 'upi://pay?' + deepLinkParams.toString();
+    let razorpayOrder;
+    try {
+      razorpayOrder = await createRazorpayOrder({ amountPaise, receipt: orderId });
+    } catch (err) {
+      console.error('[create-payment] Razorpay order failed:', err.message);
+      const status = err.statusCode || 502;
+      return res.status(status).json({
+        success: false,
+        error: 'Could not create the payment order. Please try again later.'
+      });
+    }
+
+    // Security Decision: Cryptographically bind the EXACT reading payload to
+    // this Razorpay order. The state token is signed server-side (TOKEN_SECRET),
+    // short-lived, and is what /api/verify-razorpay will trust to rebuild the
+    // reading parameters. The browser cannot alter any bound field without
+    // invalidating the signature.
+    const now = Math.floor(Date.now() / 1000);
+    const state = stateToken.sign({
+      v: 1,
+      razorpayOrderId: razorpayOrder.id,
+      name,
+      dob: String(dob),
+      birthplace,
+      tradition: selectedTradition,
+      photoHash: cleanPhotoHash,
+      orderId,
+      amount,
+      amountPaise,
+      currency: CURRENCY,
+      iat: now,
+      exp: now + stateToken.TTL_SECONDS
+    }, tokenSecret);
 
     return res.status(200).json({
       success: true,
       payment: {
-        upiId,
-        amount,
-        payeeName,
-        note,
         orderId,
-        deepLink
+        razorpayOrderId: razorpayOrder.id,
+        keyId,
+        amount,
+        amountPaise,
+        currency: CURRENCY,
+        stateToken: state,
+        stateTokenTtlSeconds: stateToken.TTL_SECONDS
       }
     });
   } catch (err) {
     console.error('[create-payment] error:', err);
     return res.status(500).json({
       success: false,
-      error: 'Could not create payment instruction. Please try again.'
+      error: 'Could not create payment order. Please try again.'
     });
   }
 };
+
+module.exports.createRazorpayOrder = createRazorpayOrder;
