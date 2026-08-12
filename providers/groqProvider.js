@@ -11,6 +11,17 @@ const { reviewReading } = require('./reviewEngine');
 const { buildRewritePrompt } = require('./rewritePromptBuilder');
 const OpenAI = require('openai');
 
+// Provider configuration. Optional env overrides (GROQ_MODEL, GROQ_BASE_URL)
+// default to the current working production configuration. Read at call time so
+// tests and runtime configuration changes take effect without re-requiring the
+// module. GROQ_API_KEY remains the only required secret for the AI path.
+function getProviderConfig() {
+  return {
+    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    baseURL: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'
+  };
+}
+
 /**
  * Parses Groq's plain text response using ONLY the required section markers:
  * ===CORE===, ===LOVE===, ===PRO===
@@ -76,7 +87,7 @@ async function callAIReviewer(client, reading, reasoningPlan, tradition, userCon
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: getProviderConfig().model,
       messages: [{ role: 'user', content: reviewPrompt }],
       temperature: 0.3, // More analytical for review
       max_completion_tokens: 1500
@@ -208,7 +219,7 @@ async function callAIRewriter(client, draft, review, reasoningPlan, tradition, u
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: getProviderConfig().model,
       messages: [{ role: 'user', content: rewritePrompt }],
       temperature: 0.4, // Balanced for editing
       max_completion_tokens: 2200
@@ -255,15 +266,16 @@ async function generateReading(params) {
   const apiKey = process.env.GROQ_API_KEY;
   console.log('[groqProvider] GROQ_API_KEY present:', !!apiKey);
 
-  // If no API key, immediately fallback to template provider
+  // If no API key, immediately fallback to template provider (labeled)
   if (!apiKey) {
-    console.log('[groqProvider] No API key, falling back to templateProvider');
-    return templateProvider.generateReading(params);
+    console.warn('[groqProvider] No GROQ_API_KEY set. Returning labeled template fallback.');
+    const fallback = await templateProvider.generateReading(params);
+    return { ...fallback, provider: 'template', aiGenerated: false, reason: 'missing_api_key' };
   }
 
   // Initialize OpenAI client configured for Groq
   const client = new OpenAI({
-    baseURL: 'https://api.groq.com/openai/v1',
+    baseURL: getProviderConfig().baseURL,
     apiKey: apiKey
   });
 
@@ -279,21 +291,22 @@ async function generateReading(params) {
   console.log('[groqProvider] Component count:', pipeline.reasoningPlan ? 'from pipeline' : 'N/A');
   console.log('[groqProvider] Prompt length:', prompt?.length || 0);
   
-  // If pipeline not ready, fallback to template
+  // If pipeline not ready, fallback to template (labeled)
   if (pipeline.status !== 'ready') {
-    console.warn('[groqProvider] Pipeline not ready, falling back to templateProvider');
-    return templateProvider.generateReading(params);
+    console.warn('[groqProvider] Pipeline not ready. Returning labeled template fallback.');
+    const fallback = await templateProvider.generateReading(params);
+    return { ...fallback, provider: 'template', aiGenerated: false, reason: 'pipeline_not_ready' };
   }
 
   // Use single production model
-  console.log('[groqProvider] Using model: llama-3.3-70b-versatile');
+  console.log('[groqProvider] Using model:', getProviderConfig().model);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
   try {
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: getProviderConfig().model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.85,
       max_completion_tokens: 2200
@@ -378,19 +391,35 @@ async function generateReading(params) {
       console.log('[groqProvider] Returning original draft (rewrite skipped or failed)');
     }
 
-    // Return internally: { draft, review, rewritten }
-    // Public API still returns: final reading only
-    // Review/rewrite are only logged
-    return finalReading;
+    // Truthful source labeling: aiGenerated is true only when the final content
+    // includes genuine Groq output (writer or rewriter). fallbackSections records
+    // which sections the writer failed to produce and were filled from the
+    // deterministic template. A paying customer must never receive an unlabeled
+    // template reading presented as AI output.
+    const fallbackSections = { core: !parsed.core, love: !parsed.love, pro: !parsed.pro };
+    const anyWriterSection = !!(parsed.core || parsed.love || parsed.pro);
+    const aiGenerated = !!(anyWriterSection || !!rewritten);
+    console.log('[groqProvider] Final reading source:', JSON.stringify({
+      aiGenerated,
+      fallbackSections,
+      rewritten: !!rewritten
+    }));
+
+    return {
+      ...finalReading,
+      provider: 'groq',
+      aiGenerated,
+      model: getProviderConfig().model,
+      fallbackSections,
+      reason: aiGenerated ? undefined : 'empty_or_malformed_response'
+    };
 
   } catch (err) {
     clearTimeout(timeoutId);
 
-    console.error('[groqProvider] Groq generation failed:');
-    console.error(err);
-    console.warn('[groqProvider] Falling back to template provider.');
-
-    return templateProvider.generateReading(params);
+    console.error('[groqProvider] Groq generation failed. Returning labeled template fallback:', err.message || err);
+    const fallback = await templateProvider.generateReading(params);
+    return { ...fallback, provider: 'template', aiGenerated: false, reason: 'provider_error' };
   }
 }
 

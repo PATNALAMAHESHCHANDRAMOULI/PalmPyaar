@@ -469,6 +469,19 @@ body.is-ready {
   color: rgba(232, 163, 61, 0.75);
 }
 
+.photo-status[data-state="loading"]::before {
+  content: '\2026';
+  margin-left: 0.25rem;
+  animation: ellipsis 1.2s ease-in-out infinite;
+}
+
+@keyframes ellipsis {
+  0% { content: '\2026'; }
+  33% { content: '\2026\2026'; }
+  66% { content: '\2026\2026\2026'; }
+  100% { content: '\2026'; }
+}
+
 /* ─── Teaser flow cue ─── */
 
 .teaser-flow {

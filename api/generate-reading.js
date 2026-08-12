@@ -91,14 +91,24 @@ module.exports = async function handler(req, res) {
       proPreview: reading.pro.slice(0, 100)
     });
 
+    // Truthful source labeling: template mode is intentional and labeled AI=false;
+    // AI mode carries aiGenerated/metadata from the provider so a template
+    // fallback can never be mistaken for genuine AI output.
+    const aiGenerated = reading.aiGenerated === true;
+    const providerName = useAi ? 'groq' : 'template';
+
     return res.status(200).json({
       success: true,
-      reading
+      reading,
+      provider: providerName,
+      aiGenerated
     });
   } catch (err) {
+    // Log the real error server-side, but never leak internal details to the client.
+    console.error('[generate-reading] Unexpected error:', err && err.message ? err.message : err);
     return res.status(500).json({
       success: false,
-      error: 'Server error generating reading: ' + (err.message || String(err))
+      error: 'Server error generating reading. Please try again.'
     });
   }
 };

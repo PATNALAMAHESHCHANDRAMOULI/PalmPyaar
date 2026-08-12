@@ -454,3 +454,63 @@ Deviations from spec, if any:
 - Pre-existing failures in `scripts/testPalmEvidenceIntegrity.js` (7/13) and `scripts/testOpeningLibrary.js` (1/38) are unrelated to this migration (palm-evidence MODE B selection); not touched by this phase.
 
 What's next: Deploy — set `PAYMENT_UPI_ID`, `ADMIN_CONFIRM_SECRET`, `TOKEN_SECRET` in Vercel, then manually test the UPI flow on a phone.
+
+### Phase 0B — AI provider path hardening + truthful source labeling — 2026-08-12
+Files created/modified:
+- providers/groqProvider.js — env-configurable model/URL (GROQ_MODEL, GROQ_BASE_URL); every fallback now explicitly labeled.
+- pi/generate-reading.js — response now includes provider + iGenerated; 500 errors sanitized (no internal detail leak).
+- .env.example — reading-provider block rewritten (GROQ_API_KEY / GROQ_MODEL / GROQ_BASE_URL; GEMINI_API_KEY removed).
+- scripts/verifyAiProviderPath.js — new verification suite (13 checks) against a local mock Groq server; no live quota spent.
+
+Key decisions made:
+- Template fallbacks are explicitly labeled: { provider: 'template', aiGenerated: false, reason: 'missing_api_key' | 'pipeline_not_ready' | 'provider_error' }. A paying customer can never receive an unlabeled template reading presented as AI output.
+- Successful AI output returns { provider: 'groq', aiGenerated, model, fallbackSections, reason }; iGenerated is true only when genuine Groq output (writer or rewriter) is in the final reading.
+- Groq config is read at call time via getProviderConfig() (GROQ_MODEL default llama-3.3-70b-versatile, GROQ_BASE_URL default https://api.groq.com/openai/v1).
+- scripts/verifyAiProviderPath.js verifies provider selection, model, assembled prompt content, controlled failure modes, client-side secret hygiene, and re-runs the 4 existing regression suites.
+
+Tests (all passing):
+- scripts/verifyAiProviderPath.js (13 checks) — uses a local mock OpenAI-compatible Groq server; no live API key/quota needed.
+
+---
+
+### Phase 2 (Real Image Validation) — 2026-08-12
+Files created/modified:
+- `js/palmValidator.js` — **NEW** — client-side palm image validation using MediaPipe Hands loaded from jsdelivr CDN (free). Lazy-loads the library and model only when the user first selects a photo. No npm dependency added.
+- `js/teaser.js` — `onPhotoChange` now calls `PalmValidator.validateImage(file)` before hashing. The image is only hashed after successful CV validation. Added file-size pre-check (10 MB).
+- `css/style.css` — Added ellipsis animation on the "Checking image…" loading state.
+- `index.html` — Added `<script src="js/palmValidator.js">` (loaded before `js/teaser.js`). Updated photo hint and default status text to mention validation.
+- `scripts/verifyPalmValidation.js` — **NEW** — 17 focused checks for the validation layer.
+
+Key decisions made:
+- Chose `@mediapipe/hands` (not `@mediapipe/tasks-vision`) because it supports script-tag injection and the `locateFile` callback pattern that works cleanly with vanilla JS static files — no ES modules or npm bundling needed.
+- The MediaPipe model (~10 MB) is lazy-loaded on first photo selection; subsequent validations reuse the cached instance. During first load the UI shows "Checking image…" with an ellipsis animation.
+- Validation pipeline: MIME type → file size ≤ 10 MB → image load → dimensions ≥ 200 px → MediaPipe hand detection → exactly 1 hand detected → detection confidence ≥ 0.5 → fingers extended (open palm, not a fist). If any check fails, the image is NOT hashed and a specific user-facing error is shown.
+- The `updateUnlockState` guard was extended to not overwrite an existing `error` state on the photo-status element (prevents the generic "A hand photo is required" from clobbering a specific validation error like "No hand detected").
+- No palm-line/mount/line analysis is performed — Phase 2 is validation only. The reading system still receives only `photoHash` (SHA-256) and `photoHashPresent: true`. There is no "palmEvidence" data flow from CV to the AI provider.
+- Payment code (`js/checkout.js`, `api/create-payment.js`, `api/verify-razorpay.js`) is completely untouched — the backend still requires a valid 64-char hex photoHash, which now only gets set after successful validation.
+
+Env vars now required: unchanged (no new env vars).
+
+Validation states surfaced to the user:
+- "Checking image…" (loading)
+- "No hand detected. Please upload a clear photo of your palm."
+- "Multiple hands detected. Please upload one palm only."
+- "Image is too small or blurry. Please upload a clearer photo of your palm."
+- "Please show your open palm. Keep your fingers spread for a clear photo."
+- "Image is too large. Please choose a file under 10 MB."
+- "Palm image validated — hashed on your device, never uploaded." (success)
+
+Tests (all passing):
+- scripts/verifyPalmValidation.js (17 checks)
+- scripts/verifyAiProviderPath.js (13 checks) — all regression suites still pass
+- scripts/verifyUpiPaymentFlow.js (21 checks) — payment flow untouched
+- scripts/verifyRazorpaySecurity.js (32 checks) — security untouched
+- scripts/verifyProductionChecks.js (26 checks)
+- scripts/verifyCustomerJourney.js (11 checks)
+
+Deviations from spec, if any:
+- None.
+
+What's next: Phase 3 — Full palm line analysis (optional, future). The validation layer in Phase 2 only confirms a hand is present; extracting actual palm-line/mount observations would require a separate model or more detailed landmark analysis. Until then, the AI reading system receives only `photoHashPresent: true` and must not claim specific palm observations.
+
+To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 3."

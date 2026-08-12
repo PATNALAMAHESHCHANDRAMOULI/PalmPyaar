@@ -98,7 +98,7 @@
 
           <div class="field field--photo">
             <label for="photo" class="field__label">Hand photo (required)</label>
-            <p class="field__hint">Your palm photo personalizes your reading. It is hashed on your device and never uploaded or stored.</p>
+            <p class="field__hint">Your palm photo personalizes your reading. It is validated in your browser using MediaPipe Hands, then hashed client-side and never uploaded or stored.</p>
             <div class="photo-upload">
               <input type="file" id="photo" name="photo" class="photo-upload__input" accept="image/*" required>
               <label for="photo" class="photo-upload__label">
@@ -106,7 +106,7 @@
                 <span class="photo-upload__text">Add your hand photo</span>
               </label>
             </div>
-            <p id="photo-status" class="photo-status" data-state="idle">A hand photo is required — hashed on your device, never uploaded.</p>
+            <p id="photo-status" class="photo-status" data-state="idle">A hand photo is required — validated and hashed on your device, never uploaded.</p>
           </div>
         </form>
 
@@ -171,6 +171,7 @@
   </div>
 
   <script src="content/templates.js"></script>
+  <script src="js/palmValidator.js"></script>
   <script src="js/teaser.js"></script>
   <script src="js/checkout.js"></script>
 </body>

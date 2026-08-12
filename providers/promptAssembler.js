@@ -105,11 +105,10 @@ function sanitizeUserContext(params) {
 /**
  * Assembles repository components into a single production prompt string.
  * 
- * Since repository currently returns placeholder metadata (content: null),
- * this creates readable placeholder sections for each component.
- * 
- * FUTURE: When repository loads actual content from markdown,
- * this function will interpolate component.content with userContext.
+ * Each component's actual instruction content (component.content) is
+ * interpolated verbatim into the compiled prompt in pipeline order. If a
+ * component is ever missing content, a readable placeholder marks the gap so
+ * assembly never silently drops a section.
  * 
  * @param {Array<Object>} components - Repository component objects in pipeline order
  * @param {Object} userContext - Sanitized user input
@@ -133,12 +132,12 @@ function assembleComponents(components, userContext, reasoningPlan) {
 
     const sections = components.map((component, index) => {
         const header = sectionHeaders[index];
+        const content = component && typeof component.content === 'string'
+            ? component.content.trim()
+            : '';
         const lines = [
             `===== ${header} =====`,
-            `Source: ${component.sourceDocument}`,
-            `Version: ${component.version}`,
-            `Description: ${component.description}`,
-            component.futureSource ? `Future: ${component.futureSource}` : '',
+            content ? content : '(Component content pending)',
             ''
         ].filter(Boolean);
         return lines.join('\n');
@@ -210,7 +209,7 @@ function assembleComponents(components, userContext, reasoningPlan) {
  * @property {string} metadata.pipelineVersion - Version of this assembly pipeline
  * @property {string} metadata.assembledAt - ISO timestamp of assembly
  * @property {string} metadata.tradition - Target tradition
- * @property {number} metadata.componentCount - Number of components assembled (always 10)
+ * @property {number} metadata.componentCount - Number of components assembled (always 11)
  * @property {Array<Object>} components - Repository component objects in pipeline order
  * @property {Object} userContext - Sanitized user input for downstream compilation
  * @property {string} compiledPrompt - Production prompt string assembled from components

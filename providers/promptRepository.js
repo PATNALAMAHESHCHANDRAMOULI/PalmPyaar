@@ -360,9 +360,9 @@ YOUR RESPONSIBILITY:
 - NEVER treat photoHash, photo, or photoHashPresent as palm-analysis evidence. They are NOT.
 
 FORBIDDEN PATTERNS (even if not in Selected Opening):
-- "your life line..." / "your heart line..." / "your head line..." / "your health line..."
-- "your Venus mount..." / "your Mercury mount..." / "your Jupiter mount..." / "your Saturn mount..." / "your Moon mount..." / "your Mars mount..."
-- "the scar on your..." / "at seven..." / "at fourteen..." / "when you were [age]..."
+- Claiming to observe a specific palm line (life, heart, head, health) as if read from the hand
+- Claiming a mount was prominent or flat (Venus, Mercury, Jupiter, Saturn, Moon, Mars) without verified evidence
+- Referencing a scar, or inventing an exact age or childhood milestone
 - Any invented exact age or life event
 - Any claim that a palm feature was observed without verified evidence in the reasoning plan
 

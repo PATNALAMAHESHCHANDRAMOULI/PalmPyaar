@@ -142,7 +142,7 @@
     var canUnlock = !!currentPhotoHash && !!teaserVisible;
     unlockBtn.disabled = !canUnlock;
     unlockBtn.setAttribute('aria-disabled', String(!canUnlock));
-    if (photoStatus && !currentPhotoHash && teaserVisible) {
+    if (photoStatus && !currentPhotoHash && teaserVisible && photoStatus.dataset.state !== 'error') {
       setPhotoStatus('A hand photo is required to unlock your reading.', 'error');
     }
   }
@@ -196,16 +196,48 @@
       return;
     }
 
-    setPhotoStatus('Hashing on your device\u2026', 'loading');
+    if (file.size > 10 * 1024 * 1024) {
+      event.target.value = '';
+      currentPhotoHash = '';
+      setPhotoStatus('Image is too large. Please choose a file under 10 MB.', 'error');
+      if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
+      updateTeaser();
+      return;
+    }
+
+    setPhotoStatus('Checking image\u2026', 'loading');
     if (photoLabelText) photoLabelText.textContent = file.name;
 
-    hashPhoto(file).then(function (hash) {
-      currentPhotoHash = hash;
-      setPhotoStatus('Hand photo hashed locally \u2014 never uploaded.', 'success');
+    if (!window.PalmValidator || typeof window.PalmValidator.validateImage !== 'function') {
+      setPhotoStatus('Hand photo validator unavailable. Please refresh the page.', 'error');
+      event.target.value = '';
+      if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
-    }).catch(function () {
+      return;
+    }
+
+    window.PalmValidator.validateImage(file).then(function (result) {
+      if (!result || !result.valid) {
+        currentPhotoHash = '';
+        setPhotoStatus(result ? (result.reason || 'Image could not be validated.') : 'Image could not be validated.', 'error');
+        if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
+        updateTeaser();
+        return;
+      }
+
+      hashPhoto(file).then(function (hash) {
+        currentPhotoHash = hash;
+        setPhotoStatus('Palm image validated — hashed on your device, never uploaded.', 'success');
+        updateTeaser();
+      }).catch(function () {
+        currentPhotoHash = '';
+        setPhotoStatus('Could not hash your photo. Try another image.', 'error');
+        if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
+        updateTeaser();
+      });
+    }).catch(function (err) {
       currentPhotoHash = '';
-      setPhotoStatus('Could not hash your photo. Try another image.', 'error');
+      setPhotoStatus(err.message || 'Could not validate your photo. Try another image.', 'error');
       if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
     });
