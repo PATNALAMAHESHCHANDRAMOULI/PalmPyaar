@@ -643,6 +643,65 @@ function identifyStrengths(sections, scores, reasoningPlan) {
 function identifyWeaknesses(sections, scores, reasoningPlan) {
     const weaknesses = [];
 
+    // Truthfulness checks: unsupported palmistry claims (safety-critical, run first)
+    const allText = (sections.core + ' ' + sections.love + ' ' + sections.pro).toLowerCase();
+    
+    const palmLinePatterns = [
+        /\bheart\s+line\b/i,
+        /\bhead\s+line\b/i,
+        /\blife\s+line\b/i,
+        /\bfate\s+line\b/i,
+        /\bhealth\s+line\b/i,
+        /\bsun\s+line\b/i,
+        /\bapollo\s+line\b/i,
+        /\bmercury\s+line\b/i,
+        /\bintuition\s+line\b/i,
+        /\bmarriage\s+line\b/i,
+        /\bgirdle\s+of\s+venus\b/i,
+        /\bring\s+of\s+solomon\b/i,
+        /\bsimian\s+line\b/i,
+        /\btransverse\s+crease\b/i
+    ];
+    for (const pattern of palmLinePatterns) {
+        if (pattern.test(allText)) {
+            weaknesses.push('Claims a specific palm line without verified evidence.');
+            break;
+        }
+    }
+
+    const mountPatterns = [
+        /\bvenus\s+mount\b/i,
+        /\bjupiter\s+mount\b/i,
+        /\bsaturn\s+mount\b/i,
+        /\bmercury\s+mount\b/i,
+        /\bmoon\s+mount\b/i,
+        /\bmars\s+mount\b/i,
+        /\bapollo\s+mount\b/i,
+        /\bneptune\s+mount\b/i,
+        /\bpluto\s+mount\b/i
+    ];
+    for (const pattern of mountPatterns) {
+        if (pattern.test(allText)) {
+            weaknesses.push('Claims a palm mount without verified evidence.');
+            break;
+        }
+    }
+
+    const guaranteePatterns = [
+        /\byou\s+will\s+(meet|marry|find|get|become|have|receive)\b/i,
+        /\bguaranteed\b/i,
+        /\bcertainly\s+will\b/i,
+        /\bproves\s+you\s+will\b/i,
+        /\bpalm\s+proves\b/i,
+        /\bpalm\s+indicates\s+(longevity|health|disease|anxiety|depression)\b/i
+    ];
+    for (const pattern of guaranteePatterns) {
+        if (pattern.test(allText)) {
+            weaknesses.push('Contains guaranteed prediction or medical/scientific claim unsupported by evidence.');
+            break;
+        }
+    }
+
     if (scores.recognition < 7) {
         weaknesses.push('CORE section lacks personal specificity — generic addressing.');
     }
@@ -669,8 +728,6 @@ function identifyWeaknesses(sections, scores, reasoningPlan) {
     }
 
     // Specific textual checks
-    const allText = (sections.core + ' ' + sections.love + ' ' + sections.pro).toLowerCase();
-    
     if ((sections.core || '').trim().length < 100) {
         weaknesses.push('CORE section too brief for Recognition stage.');
     }
@@ -747,6 +804,24 @@ function generateRewriteTargets(sections, scores, weaknesses, reasoningPlan) {
                 section: 'ALL',
                 problem: 'Originality compromised by clichés; symbolic thread absent',
                 improvement: `Replace all stock phrases with ${reasoningPlan.symbolicThread || 'fresh imagery'}; develop supporting themes: ${(reasoningPlan.supportingThemes || []).join(', ')}`
+            };
+        } else if (weakness.includes('Claims a specific palm line without verified evidence')) {
+            target = {
+                section: 'ALL',
+                problem: 'Unsupported palm line claim',
+                improvement: 'Remove any reference to named palm lines (heart, head, life, fate, etc.) unless they were explicitly supplied as verified evidence. Replace with geometry-grounded or tradition-grounded language.'
+            };
+        } else if (weakness.includes('Claims a palm mount without verified evidence')) {
+            target = {
+                section: 'ALL',
+                problem: 'Unsupported palm mount claim',
+                improvement: 'Remove any reference to palm mounts unless explicitly supplied as verified evidence. Replace with geometry-grounded or tradition-grounded language.'
+            };
+        } else if (weakness.includes('Contains guaranteed prediction or medical/scientific claim')) {
+            target = {
+                section: 'ALL',
+                problem: 'Unsupported prediction or medical/scientific claim',
+                improvement: 'Remove guarantees, predictions, and medical/scientific claims. Reframe as reflective possibility within the selected tradition.'
             };
         }
 

@@ -513,4 +513,39 @@ Deviations from spec, if any:
 
 What's next: Phase 3 — Full palm line analysis (optional, future). The validation layer in Phase 2 only confirms a hand is present; extracting actual palm-line/mount observations would require a separate model or more detailed landmark analysis. Until then, the AI reading system receives only `photoHashPresent: true` and must not claim specific palm observations.
 
-To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 3."
+---
+
+### Phase 5 — Truthful AI path + palm evidence + template hardening — 2026-08-13
+Files created/modified:
+- `providers/templateProvider.js` — removed unsafe palmistry claims ("palm signature", "headline", "heart line trajectory"); added `formatPalmGeometryEvidence()` support for geometric evidence paragraph
+- `providers/promptAssembler.js` — added `sanitizeUserContext()` with prompt-injection marker stripping; added `geometryThemes` to reasoning plan section
+- `providers/promptRepository.js` — added explicit Evidence Contract to system identity (USER-PROVIDED FACTS, VERIFIED PALM GEOMETRY, TRADITION-SPECIFIC INPUT, INTERPRETIVE LANGUAGE, SPECULATION); added transformation rules forbidding fact→prediction, geometry→divination, interpretation→reality, speculation→certainty
+- `providers/reasoningPlanner.js` — added `isValidPalmEvidenceShape()` helper; added `geometryThemes` array to structured plan derived from actual palm geometry measurements
+- `providers/reviewEngine.js` — added truthfulness checks in `identifyWeaknesses()` detecting named palm lines, mounts, guaranteed predictions, and medical/scientific claims; added corresponding rewrite targets in `generateRewriteTargets()`
+- `providers/openingLibrary.js` — added `hasLegacyObservationalEvidence()` to distinguish legacy observational evidence from Phase 3A geometric evidence; hardened `getOpening()` to skip MODE B category selection when only geometric evidence is present
+- `js/reveal.js` — sanitized `getPlaceholderData()` to remove old unsafe palmistry claims; replaced with safe generic placeholder text
+- `scripts/verifyPhase5.js` — new 34-test verification suite
+
+Key decisions made:
+- Template fallback no longer makes unsupported palmistry claims; optionally includes a geometry paragraph when `palmEvidence` is present
+- Reviewer truthfulness checks run before score-based weaknesses so they are never capped away
+- Reasoning planner produces geometry-linked themes (e.g., "hand shape emphasizes breadth relative to vertical span") rather than generic filler
+- Prompt injection markers (e.g., `===CORE===`) are stripped from user-supplied `name` and `birthplace` before reaching AI prompts
+- Opening library now distinguishes geometric evidence from legacy observational evidence; MODE B (palm observation templates) only activates when legacy arrays (`lines`, `mounts`, `markings`, `fingers`) contain content
+- `hasVerifiedPalmEvidence()` unchanged for backward compatibility; new `hasLegacyObservationalEvidence()` used for MODE B selection
+
+Security decisions:
+- No payment/security logic changed — Razorpay signature verification, amount enforcement, state-token binding, reading-token HMAC, token expiry remain unchanged
+- Server-side validation (`isValidPalmEvidence()`) continues to enforce exact key whitelist, numeric ranges, and type checks at three checkpoints
+- Raw image data, base64, URLs, and arbitrary strings cannot enter the geometry evidence block
+- `photoHash` remains metadata-only; never mixed into geometry blocks or interpretation
+
+Env vars now required: (unchanged)
+
+Tests (all passing):
+- `scripts/verifyPhase5.js` (34 checks) — evidence contract, fact vs interpretation, structured plan, generic filler, evidence linking, tradition handling, reviewer truthfulness, rewriter context, determinism, template fallback, output contract, security
+- All existing suites (306 total) still pass; zero regressions
+
+To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 6."
+
+---

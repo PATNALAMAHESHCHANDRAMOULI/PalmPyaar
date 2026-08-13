@@ -50,31 +50,16 @@
     var tradName = capitalize(tradition) || 'Western';
 
     return {
-      core: '<p class="reading-paragraph">Your birth configuration in <strong>' + birthplace + '</strong> under the <strong>' + tradName + '</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>' + sign + '</strong>, your palm signature indicates high resilience and reflective depth.</p>' +
-            '<p class="reading-paragraph">The subtle curves of your headline suggest a mind that processes experiences thoroughly before taking decisive action. You often notice details others overlook, giving you an understated advantage in long-term endeavors.</p>',
+      core: '<p class="reading-paragraph">Your birth configuration in <strong>' + birthplace + '</strong> under the <strong>' + tradName + '</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>' + sign + '</strong>, your profile suggests a reflective temperament that values authenticity over surface.</p>' +
+            '<p class="reading-paragraph">You often notice details others overlook, giving you an understated advantage in long-term endeavors. The pattern here is not repetition for its own sake — it is depth that accumulates quietly over time.</p>',
 
-      love: '<p class="reading-paragraph">In personal connections, your energy seeks authenticity and mutual intellectual respect over fleeting excitement. Your palm\'s heart line trajectory shows a deep capacity for empathy paired with clear personal boundaries.</p>' +
-            '<blockquote class="reading-quote">"True synergy occurs when your grounded nature aligns with a partner who values quiet constancy."</blockquote>' +
+      love: '<p class="reading-paragraph">In personal connections, your energy seeks authenticity and mutual intellectual respect over fleeting excitement. You tend to observe before revealing yourself, which can make your trust feel like a quiet gift once given.</p>' +
             '<p class="reading-paragraph">Light relationship note: Upcoming months favor clear, honest conversations that bring renewed warmth and mutual understanding to your closest bonds.</p>',
 
-      pro: '<div class="pro-grid">' +
-            '  <div class="pro-card">' +
-            '    <h3 class="pro-card__title">Western Verdict</h3>' +
-            '    <p class="pro-card__text">Focus on steady personal growth and creative pursuits; clarity arrives as Saturn aligns with your focal solar house.</p>' +
-            '  </div>' +
-            '  <div class="pro-card">' +
-            '    <h3 class="pro-card__title">Vedic Insight</h3>' +
-            '    <p class="pro-card__text">Your dasha period emphasizes patience in career milestones while fostering inner balance and spiritual harmony.</p>' +
-            '  </div>' +
-            '  <div class="pro-card">' +
-            '    <h3 class="pro-card__title">Hellenic Arc</h3>' +
-            '    <p class="pro-card__text">The essential dignity of your ruling planet favors strategic choices made during the upcoming lunar cycle.</p>' +
-            '  </div>' +
-            '</div>' +
-            '<div class="outlook-box">' +
-            '  <h3 class="outlook-box__title">12-Month Outlook</h3>' +
-            '  <p class="outlook-box__text">Q1 & Q2 center on laying strong foundations and organizing key goals. Q3 brings opportunities for expanding social and professional circles. Q4 brings a sense of deep personal completion and fulfillment.</p>' +
-            '</div>'
+      pro: '<p class="reading-paragraph">Focus on steady personal growth and creative pursuits; clarity arrives as you align with your own rhythm rather than external expectations.</p>' +
+            '<p class="reading-paragraph">Your dasha period emphasizes patience in career milestones while fostering inner balance and spiritual harmony.</p>' +
+            '<p class="reading-paragraph">The essential dignity of your ruling planet favors strategic choices made during the upcoming lunar cycle.</p>' +
+            '<p class="reading-paragraph">Q1 & Q2 center on laying strong foundations and organizing key goals. Q3 brings opportunities for expanding social and professional circles. Q4 brings a sense of deep personal completion and fulfillment.</p>'
     };
   }
 

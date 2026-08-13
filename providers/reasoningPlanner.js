@@ -63,6 +63,21 @@ const PLANNER_VERSION = '1.0.0';
 const { getOpening } = require('./openingLibrary');
 
 /**
+ * Lightweight shape check for palmEvidence in the planner.
+ * Does not replace server-side validation — only checks that the object
+ * has the expected top-level keys so we can safely derive geometry themes.
+ */
+function isValidPalmEvidenceShape(evidence) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return false;
+  const validTopKeys = ['palmBounds', 'fingerRatios', 'geometricRatios', 'palmAngle'];
+  const keys = Object.keys(evidence);
+  for (var i = 0; i < keys.length; i++) {
+    if (validTopKeys.indexOf(keys[i]) === -1) return false;
+  }
+  return true;
+}
+
+/**
  * Tradition-specific planning defaults.
  * Each tradition has a distinct psychological/karmic/constitutional lens.
  */
@@ -402,6 +417,56 @@ function planReading(params) {
         palmEvidence: params.palmEvidence // Optional - only for MODE B
     });
 
+    // Geometry themes: derive evidence-linked themes from actual palm geometry.
+    // These are INTERNAL planning fields only. They are not exposed as chain-of-thought.
+    // Every geometry theme must be traceable to an actual measurement.
+    var geometryThemes = [];
+    if (params.palmEvidence && isValidPalmEvidenceShape(params.palmEvidence)) {
+        const pb = params.palmEvidence.palmBounds;
+        const fr = params.palmEvidence.fingerRatios;
+        const gr = params.palmEvidence.geometricRatios;
+        const pa = params.palmEvidence.palmAngle;
+
+        if (pb && pb.aspectRatio > 1.15) {
+            geometryThemes.push('hand shape emphasizes breadth relative to vertical span');
+        } else if (pb && pb.aspectRatio < 0.9) {
+            geometryThemes.push('hand shape emphasizes vertical span relative to breadth');
+        } else {
+            geometryThemes.push('hand proportions are balanced between breadth and vertical span');
+        }
+
+        if (gr && gr.indexToMiddle > 1.02) {
+            geometryThemes.push('middle finger extends beyond index finger');
+        } else if (gr && gr.indexToMiddle < 0.98) {
+            geometryThemes.push('index finger extends beyond middle finger');
+        } else {
+            geometryThemes.push('index and middle fingers are close in length');
+        }
+
+        if (fr && fr.thumb > 0.75) {
+            geometryThemes.push('thumb shows relatively extended proportion');
+        } else if (fr && fr.thumb < 0.55) {
+            geometryThemes.push('thumb shows relatively compact proportion');
+        }
+
+        if (gr && gr.fingerSpanToHeight > 1.3) {
+            geometryThemes.push('finger span is wide relative to palm height');
+        } else if (gr && gr.fingerSpanToHeight < 1.0) {
+            geometryThemes.push('finger span is compact relative to palm height');
+        }
+
+        if (pa !== undefined && pa !== null) {
+            const absAngle = Math.abs(pa);
+            if (absAngle > 20) {
+                geometryThemes.push('palm orientation is noticeably angled from horizontal');
+            } else if (absAngle > 5) {
+                geometryThemes.push('palm orientation has a slight angular tilt');
+            } else {
+                geometryThemes.push('palm orientation is close to horizontal');
+            }
+        }
+    }
+
     return {
         centralTheme,
         supportingThemes,
@@ -417,7 +482,8 @@ function planReading(params) {
         narrativeFlow: tradition.narrativeFlow,
         literaryStyle: tradition.literaryStyle,
         traditionLens: tradition.lens,
-        selectedOpening
+        selectedOpening,
+        geometryThemes
     };
 }
 

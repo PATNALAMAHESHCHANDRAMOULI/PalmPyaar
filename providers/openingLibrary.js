@@ -385,6 +385,22 @@ function hasVerifiedPalmEvidence(palmEvidence) {
 }
 
 /**
+ * Returns true only when palmEvidence contains legacy observational arrays
+ * (lines, mounts, markings, fingers). Geometric evidence (Phase 3A) does NOT
+ * activate MODE B because it contains no named palm features.
+ */
+function hasLegacyObservationalEvidence(palmEvidence) {
+    if (!palmEvidence || typeof palmEvidence !== 'object') {
+        return false;
+    }
+    var hasObservations = !!(palmEvidence.lines && palmEvidence.lines.length > 0);
+    var hasMounts = !!(palmEvidence.mounts && palmEvidence.mounts.length > 0);
+    var hasMarkings = !!(palmEvidence.markings && palmEvidence.markings.length > 0);
+    var hasFingers = !!(palmEvidence.fingers && palmEvidence.fingers.length > 0);
+    return hasObservations || hasMounts || hasMarkings || hasFingers;
+}
+
+/**
  * Determines preferred template categories based on context
  * @param {string} tradition - Astrological tradition
  * @param {string} mood - Opening mood
@@ -632,8 +648,10 @@ function templateMatchesEvidence(templateText, palmEvidence) {
  * @returns {string} Selected opening paragraph
  */
 function getOpening({ tradition, centralTheme, symbolicThread, openingMood, palmEvidence }) {
-    // Determine if we have verified palm evidence
-    const hasPalmEvidence = hasVerifiedPalmEvidence(palmEvidence);
+    // Use legacy observational evidence for MODE B selection.
+    // Phase 3A geometric evidence (palmBounds, fingerRatios, etc.) does NOT
+    // contain named palm features, so it must not enter MODE B category selection.
+    const hasPalmEvidence = hasLegacyObservationalEvidence(palmEvidence);
 
     // Build a deterministic seed from all inputs (including palm evidence presence)
     const seedString = [
@@ -742,4 +760,8 @@ function getOpening({ tradition, centralTheme, symbolicThread, openingMood, palm
     return categoryTemplates[templateIndex].text;
 }
 
-module.exports = { getOpening, hasVerifiedPalmEvidence };
+module.exports = {
+    getOpening,
+    hasVerifiedPalmEvidence,
+    hasLegacyObservationalEvidence
+};

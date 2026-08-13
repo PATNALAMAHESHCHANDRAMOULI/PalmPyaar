@@ -1,8 +1,17 @@
 /**
  * PalmPyaar Template Provider
  * Returns deterministic template-based readings using user parameters.
- * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash })
+ * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash, palmEvidence })
+ *
+ * SAFETY:
+ * - No named palmistry lines (heart, head, life, fate).
+ * - No mounts.
+ * - No fabricated visual observations.
+ * - No medical/scientific/predictive claims.
+ * - When palmEvidence is present, references only actual geometric measurements.
  */
+
+const { formatPalmGeometryEvidence } = require('./palmGeometryFormatter');
 
 const SIGNS = [
   { name: 'Capricorn', start: [12, 22], end: [1, 19] },
@@ -63,13 +72,19 @@ async function generateReading({ name, dob, birthplace, tradition, photoHash, pa
   const safeLocation = escapeHtml(displayLocation);
   const safeTradition = escapeHtml(tradName);
 
+  const palmGeometryBlock = formatPalmGeometryEvidence(palmEvidence);
+  const palmGeometryHtml = palmGeometryBlock
+    ? `<p class="reading-paragraph">The measured proportions of your hand geometry add a layer of personal context to this reading. These measurements are used as supporting detail only — they do not predict specific events or outcomes.</p>`
+    : '';
+
   const core = `
-    <p class="reading-paragraph">Your birth configuration in <strong>${safeLocation}</strong> under the <strong>${safeTradition}</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>${sign}</strong>, your palm signature indicates high resilience and reflective depth.</p>
-    <p class="reading-paragraph">The subtle curves of your headline suggest a mind that processes experiences thoroughly before taking decisive action. You often notice details others overlook, giving you an understated advantage in long-term endeavors.</p>
+    <p class="reading-paragraph">Your birth configuration in <strong>${safeLocation}</strong> under the <strong>${safeTradition}</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>${sign}</strong>, your profile suggests a reflective temperament that values authenticity over surface.</p>
+    <p class="reading-paragraph">You often notice details others overlook, giving you an understated advantage in long-term endeavors. The pattern here is not repetition for its own sake — it is depth that accumulates quietly over time.</p>
+    ${palmGeometryHtml}
   `.trim();
 
   const love = `
-    <p class="reading-paragraph">In personal connections, your energy seeks authenticity and mutual intellectual respect over fleeting excitement. Your palm’s heart line trajectory shows a deep capacity for empathy paired with clear personal boundaries.</p>
+    <p class="reading-paragraph">In personal connections, your energy seeks authenticity and mutual intellectual respect over fleeting excitement. You tend to observe before revealing yourself, which can make your trust feel like a quiet gift once given.</p>
     <blockquote class="reading-quote">"True synergy occurs when your grounded nature aligns with a partner who values quiet constancy."</blockquote>
     <p class="reading-paragraph">Light relationship note: Upcoming months favor clear, honest conversations that bring renewed warmth and mutual understanding to your closest bonds.</p>
   `.trim();
