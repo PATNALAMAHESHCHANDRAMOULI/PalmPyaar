@@ -60,6 +60,7 @@
  * @param {string} params.userContext.birthplace - Birth location
  * @param {string} params.userContext.tradition - Tradition
  * @param {boolean} params.userContext.photoHashPresent - Whether palm photo provided
+ * @param {Object|null} [params.userContext.palmEvidence] - Verified geometric palm evidence (MODE B) or null (MODE A)
  * @param {string} params.tradition - Tradition identifier ('western'|'vedic'|'hellenic')
  * @returns {string} Complete rewriter prompt
  */
@@ -128,6 +129,7 @@ USER
 - Birthplace: ${userContext.birthplace}
 - Tradition: ${traditionDisplay}
 - Palm Photo Provided: ${userContext.photoHashPresent ? 'Yes' : 'No'}
+- Palm Evidence: ${userContext.palmEvidence ? 'Verified (geometric measurements)' : 'None'}
 
 INTENDED TRADITION FRAMEWORK: ${traditionDisplay}
 - Interpretive Lens: ${reasoningPlan.traditionLens || 'Not specified'}

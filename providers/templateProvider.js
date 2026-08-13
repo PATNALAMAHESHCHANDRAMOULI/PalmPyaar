@@ -53,7 +53,7 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-async function generateReading({ name, dob, birthplace, tradition, photoHash }) {
+async function generateReading({ name, dob, birthplace, tradition, photoHash, palmEvidence }) {
   const sign = getZodiacSign(dob);
   const tradName = capitalize(tradition) || 'Western';
   const displayName = name || 'Seeker';

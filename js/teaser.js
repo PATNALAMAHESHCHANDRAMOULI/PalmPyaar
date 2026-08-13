@@ -29,6 +29,7 @@
   var photoStatus = null;
   var photoLabelText = null;
   var currentPhotoHash = '';
+  var currentPalmEvidence = null;
 
   function getZodiacSign(month, day) {
     if (!month || !day) return null;
@@ -181,6 +182,7 @@
     var file = event.target.files && event.target.files[0];
     if (!file) {
       currentPhotoHash = '';
+      currentPalmEvidence = null;
       setPhotoStatus('A hand photo is required to unlock your reading.', 'error');
       if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
@@ -190,6 +192,7 @@
     if (!file.type.startsWith('image/')) {
       event.target.value = '';
       currentPhotoHash = '';
+      currentPalmEvidence = null;
       setPhotoStatus('Please choose an image file of your hand.', 'error');
       if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
@@ -199,6 +202,7 @@
     if (file.size > 10 * 1024 * 1024) {
       event.target.value = '';
       currentPhotoHash = '';
+      currentPalmEvidence = null;
       setPhotoStatus('Image is too large. Please choose a file under 10 MB.', 'error');
       if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
@@ -219,11 +223,16 @@
     window.PalmValidator.validateImage(file).then(function (result) {
       if (!result || !result.valid) {
         currentPhotoHash = '';
+        currentPalmEvidence = null;
         setPhotoStatus(result ? (result.reason || 'Image could not be validated.') : 'Image could not be validated.', 'error');
         if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
         updateTeaser();
         return;
       }
+
+      // Store the extracted geometry (palmEvidence) for downstream use.
+      // palmEvidence is NOT raw image data — it is normalized geometric ratios.
+      currentPalmEvidence = result.palmEvidence || null;
 
       hashPhoto(file).then(function (hash) {
         currentPhotoHash = hash;
@@ -231,12 +240,14 @@
         updateTeaser();
       }).catch(function () {
         currentPhotoHash = '';
+        currentPalmEvidence = null;
         setPhotoStatus('Could not hash your photo. Try another image.', 'error');
         if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
         updateTeaser();
       });
     }).catch(function (err) {
       currentPhotoHash = '';
+      currentPalmEvidence = null;
       setPhotoStatus(err.message || 'Could not validate your photo. Try another image.', 'error');
       if (photoLabelText) photoLabelText.textContent = 'Add your hand photo';
       updateTeaser();
@@ -313,6 +324,9 @@
   window.PalmTeaser = {
     getPhotoHash: function () {
       return currentPhotoHash;
+    },
+    getPalmEvidence: function () {
+      return currentPalmEvidence;
     }
   };
 

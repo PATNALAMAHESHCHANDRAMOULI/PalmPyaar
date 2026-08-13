@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const stateToken = require('../lib/stateToken');
 const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
+const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
 
 /**
  * Vercel Serverless Function: POST /api/verify-razorpay
@@ -26,14 +27,14 @@ const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
  *   4. Reading data is taken ONLY from the verified state token. Any reading
  *      fields supplied independently by the browser MUST match the token or the
  *      request is rejected — modified name/DOB/birthplace/tradition/photoHash/
- *      orderId can never mint a token for different data.
+ *      palmEvidence/orderId can never mint a token for different data.
  *   5. Verify the Razorpay payment signature server-side:
  *        HMAC-SHA256(key = RAZORPAY_KEY_SECRET,
  *                    message = razorpayOrderId + "|" + razorpayPaymentId)
  *      This cryptographically binds the payment to the exact Razorpay order.
  *   6. ONLY after all of the above, mint the existing-style HMAC reading token
- *      over [name, dob, birthplace, tradition, photoHash, orderId] using
- *      TOKEN_SECRET and return the /result.html URL.
+ *      over [name, dob, birthplace, tradition, photoHash, palmEvidence, orderId]
+ *      using TOKEN_SECRET and return the /result.html URL.
  *
  * SECURITY:
  *  - The frontend is never trusted: a payment is only considered paid when the
@@ -52,15 +53,20 @@ function safeEqualHex(a, b) {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-function buildResultUrl({ name, dob, birthplace, tradition, photoHash, orderId, token }) {
-  return '/result.html?' +
-    'name=' + encodeURIComponent(name) +
-    '&dob=' + encodeURIComponent(dob) +
-    '&birthplace=' + encodeURIComponent(birthplace) +
-    '&tradition=' + encodeURIComponent(tradition) +
-    '&photoHash=' + encodeURIComponent(photoHash) +
-    '&orderId=' + encodeURIComponent(orderId) +
-    '&token=' + token;
+function buildResultUrl({ name, dob, birthplace, tradition, photoHash, palmEvidence, orderId, token }) {
+  var params = [
+    'name=' + encodeURIComponent(name),
+    'dob=' + encodeURIComponent(dob),
+    'birthplace=' + encodeURIComponent(birthplace),
+    'tradition=' + encodeURIComponent(tradition),
+    'photoHash=' + encodeURIComponent(photoHash),
+    'orderId=' + encodeURIComponent(orderId),
+    'token=' + token
+  ];
+  if (palmEvidence) {
+    params.push('palmEvidence=' + encodeURIComponent(JSON.stringify(palmEvidence)));
+  }
+  return '/result.html?' + params.join('&');
 }
 
 module.exports = async function handler(req, res) {
@@ -84,7 +90,12 @@ module.exports = async function handler(req, res) {
     const browserBirthplace = String(body.birthplace || '').trim().replace(/[\r\n\t]/g, ' ');
     const browserTradition = String(body.tradition || '').trim();
     const browserPhotoHash = String(body.photoHash || '').trim().toLowerCase();
-    const browserOrderId = String(body.orderId || '').trim();
+     const browserOrderId = String(body.orderId || '').trim();
+
+    // Browser-supplied palmEvidence is cross-checked against the verified state
+    // token. If the browser sends evidence, it must match the token's value
+    // exactly (deep equality via JSON stringification). If the browser omits it,
+    // the token's value (possibly null) is authoritative.
 
     if (!receivedStateToken) {
       return res.status(400).json({
@@ -148,8 +159,8 @@ module.exports = async function handler(req, res) {
     }
 
     // --- 4. Reading data must EXACTLY match the verified state token. Missing
-    //        or modified name/DOB/birthplace/tradition/photoHash/orderId are
-    //        rejected — the browser can never mint a reading for other data. ---
+    //        or modified name/DOB/birthplace/tradition/photoHash/palmEvidence/orderId
+    //        are rejected — the browser can never mint a reading for other data. ---
     if (
       browserName !== state.name ||
       browserDob !== state.dob ||
@@ -161,6 +172,25 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({
         success: false,
         error: 'Reading data does not match the paid order. Please start a new checkout.'
+      });
+    }
+
+    // --- 4b. palmEvidence cross-check: if the browser sent palmEvidence, it must
+    //         match the value bound in the state token. The token's value is
+    //         authoritative — the browser cannot upgrade a null token to evidence
+    //         or substitute forged evidence. ---
+    var statePalmEvidence = state.palmEvidence;
+    var browserPalmEvidenceRaw = body.palmEvidence;
+    var browserPalmEvidenceStr = (browserPalmEvidenceRaw === undefined || browserPalmEvidenceRaw === null)
+      ? 'null'
+      : JSON.stringify(browserPalmEvidenceRaw);
+    var statePalmEvidenceStr = (statePalmEvidence === undefined || statePalmEvidence === null)
+      ? 'null'
+      : JSON.stringify(statePalmEvidence);
+    if (browserPalmEvidenceStr !== statePalmEvidenceStr) {
+      return res.status(400).json({
+        success: false,
+        error: 'Palm evidence does not match the paid order. Please start a new checkout.'
       });
     }
 
@@ -184,7 +214,10 @@ module.exports = async function handler(req, res) {
 
     // --- 6. Mint the existing-style HMAC reading token. Reading data is taken
     //        ONLY from the verified state token (never from the browser). ---
-    const rawPayload = [state.name, state.dob, state.birthplace, state.tradition, state.photoHash, state.orderId].join(':');
+    const palmEvidenceStr = (statePalmEvidence === undefined || statePalmEvidence === null)
+      ? ''
+      : JSON.stringify(statePalmEvidence);
+    const rawPayload = [state.name, state.dob, state.birthplace, state.tradition, state.photoHash, palmEvidenceStr, state.orderId].join(':');
     const token = crypto.createHmac('sha256', tokenSecret).update(rawPayload).digest('hex');
 
     const resultUrl = buildResultUrl({
@@ -193,6 +226,7 @@ module.exports = async function handler(req, res) {
       birthplace: state.birthplace,
       tradition: state.tradition,
       photoHash: state.photoHash,
+      palmEvidence: statePalmEvidence,
       orderId: state.orderId,
       token
     });

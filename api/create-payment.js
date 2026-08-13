@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const stateToken = require('../lib/stateToken');
 const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
+const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
 
 /**
  * Vercel Serverless Function: POST /api/create-payment
@@ -8,9 +9,12 @@ const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
  * Creates a REAL Razorpay Order for the ₹49 PalmPyaar reading. This replaces
  * the previous direct-UPI deep-link flow (no PSP callback).
  *
- * Accepts { name, dob, birthplace, tradition, photoHash }.
- * photoHash is REQUIRED: a client-side SHA-256 hex digest of the hand photo.
- * The raw image is never uploaded; only the digest is transmitted.
+   * Accepts { name, dob, birthplace, tradition, photoHash, palmEvidence }.
+   * photoHash is REQUIRED: a client-side SHA-256 hex digest of the hand photo.
+   * The raw image is never uploaded; only the digest is transmitted.
+   * palmEvidence is OPTIONAL: a client-side-extracted normalized geometry object
+   * from MediaPipe Hands landmarks. It is bound into the signed state token for
+   * tamper-evidence. Server-side whitelist validation rejects malformed evidence.
  *
  * Returns:
  *   {
@@ -29,9 +33,10 @@ const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
  *   }
  *
  * SECURITY (payment <-> reading binding):
- *  - This endpoint cryptographically binds the EXACT reading payload
- *    [name, dob, birthplace, tradition, photoHash, orderId] to the generated
- *    Razorpay order via a short-lived HMAC state token signed with TOKEN_SECRET.
+   *  - This endpoint cryptographically binds the EXACT reading payload
+   *    [name, dob, birthplace, tradition, photoHash, palmEvidence, orderId] to the
+   *    generated Razorpay order via a short-lived HMAC state token signed with
+   *    TOKEN_SECRET.
  *  - /api/verify-razorpay later reads the reading data ONLY from that verified
  *    token, so a paid order can never be replayed against modified reading data.
  *  - RAZORPAY_KEY_SECRET lives server-side only and is NEVER returned to the
@@ -95,7 +100,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    let { name, dob, birthplace, tradition, photoHash } = body;
+    let { name, dob, birthplace, tradition, photoHash, palmEvidence } = body;
 
     if (!name || !dob || !birthplace) {
       return res.status(400).json({
@@ -142,6 +147,20 @@ module.exports = async function handler(req, res) {
     }
     if (!/^[a-f0-9]{64}$/.test(cleanPhotoHash)) {
       return res.status(400).json({ success: false, error: 'Invalid photo hash.' });
+    }
+
+    // Security Decision: palmEvidence is OPTIONAL client-side geometry extracted
+    // from MediaPipe Hands landmarks. When present, it must pass strict whitelist
+    // validation (exact key set, finite numbers in plausible ranges) to prevent
+    // injection or prototype pollution. It is bound into the signed state token
+    // for tamper-evidence. When absent (null/undefined), the reading proceeds
+    // in MODE A (no verified palm evidence), which is the safe default.
+    var cleanPalmEvidence = null;
+    if (palmEvidence !== undefined && palmEvidence !== null) {
+      if (!isValidPalmEvidence(palmEvidence)) {
+        return res.status(400).json({ success: false, error: 'Invalid palm evidence.' });
+      }
+      cleanPalmEvidence = palmEvidence;
     }
 
     // --- Razorpay configuration (key id public; key secret server-only) ---
@@ -205,6 +224,7 @@ module.exports = async function handler(req, res) {
       birthplace,
       tradition: selectedTradition,
       photoHash: cleanPhotoHash,
+      palmEvidence: cleanPalmEvidence,
       orderId,
       amount,
       amountPaise,

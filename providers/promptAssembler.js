@@ -98,7 +98,8 @@ function sanitizeUserContext(params) {
         dob: params.dob.trim(),
         birthplace: params.birthplace.trim(),
         tradition: params.tradition,
-        photoHashPresent: Boolean(params.photoHash && typeof params.photoHash === 'string' && params.photoHash.trim().length > 0)
+        photoHashPresent: Boolean(params.photoHash && typeof params.photoHash === 'string' && params.photoHash.trim().length > 0),
+        palmEvidence: params.palmEvidence || null
     };
 }
 
@@ -144,6 +145,12 @@ function assembleComponents(components, userContext, reasoningPlan) {
     });
 
     // Append USER CONTEXT
+    var palmEvidenceStatus;
+    if (userContext.palmEvidence) {
+        palmEvidenceStatus = 'verified (geometric measurements: palmBounds, fingerRatios, geometricRatios, palmAngle)';
+    } else {
+        palmEvidenceStatus = 'none';
+    }
     const userContextSection = [
         '===== USER CONTEXT =====',
         `Name: ${userContext.name}`,
@@ -151,6 +158,7 @@ function assembleComponents(components, userContext, reasoningPlan) {
         `Birthplace: ${userContext.birthplace}`,
         `Tradition: ${userContext.tradition}`,
         `Photo Hash Present: ${userContext.photoHashPresent}`,
+        `Palm Evidence: ${palmEvidenceStatus}`,
         ''
     ].join('\n');
 
@@ -204,6 +212,7 @@ function assembleComponents(components, userContext, reasoningPlan) {
  * @param {string} params.birthplace - Birth city/location
  * @param {string} params.tradition - Tradition: 'western' | 'vedic' | 'hellenic'
  * @param {string} [params.photoHash] - Palm photo hash (optional, presence tracked)
+ * @param {Object|null} [params.palmEvidence] - Verified geometric palm evidence for MODE B (optional)
  * @returns {Promise<Object>} Compilation unit
  * @property {Object} metadata - Pipeline metadata
  * @property {string} metadata.pipelineVersion - Version of this assembly pipeline

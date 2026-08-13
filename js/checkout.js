@@ -50,8 +50,12 @@
     var tradition = traditionEl ? traditionEl.value : 'western';
 
     var photoHash = '';
+    var palmEvidence = null;
     if (window.PalmTeaser && typeof window.PalmTeaser.getPhotoHash === 'function') {
       photoHash = window.PalmTeaser.getPhotoHash();
+    }
+    if (window.PalmTeaser && typeof window.PalmTeaser.getPalmEvidence === 'function') {
+      palmEvidence = window.PalmTeaser.getPalmEvidence();
     }
 
     if (!name) {
@@ -85,7 +89,8 @@
       dob: dob,
       birthplace: birthplace,
       tradition: tradition,
-      photoHash: photoHash
+      photoHash: photoHash,
+      palmEvidence: palmEvidence
     };
   }
 
@@ -139,6 +144,7 @@
         birthplace: data.birthplace,
         tradition: data.tradition,
         photoHash: data.photoHash,
+        palmEvidence: data.palmEvidence,
         orderId: currentOrderId,
         stateToken: currentStateToken,
         razorpayOrderId: response.razorpay_order_id,

@@ -146,8 +146,11 @@ function deterministicSelect(arr, seed) {
  * @returns {number} Deterministic seed
  */
 function generateSeed(params) {
-    const combined = `${params.name}|${params.dob}|${params.birthplace}|${params.tradition}|${params.photoHash || ''}`;
-    return hashString(combined);
+    var base = `${params.name}|${params.dob}|${params.birthplace}|${params.tradition}|${params.photoHash || ''}`;
+    if (params.palmEvidence) {
+        base += '|' + JSON.stringify(params.palmEvidence);
+    }
+    return hashString(base);
 }
 
 /**
@@ -346,6 +349,7 @@ function planClosing(tradition, seed) {
  * @param {string} params.birthplace - Birth city/location
  * @param {string} params.tradition - Tradition: 'western' | 'vedic' | 'hellenic'
  * @param {string} [params.photoHash] - Palm photo hash (presence tracked)
+ * @param {Object|null} [params.palmEvidence] - Verified geometric palm evidence for MODE B (optional)
  * @returns {Object} Narrative plan
  * @property {string} centralTheme - Gravitational center of the reading
  * @property {Array<string>} supportingThemes - 2-3 orbiting themes

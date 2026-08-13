@@ -358,7 +358,8 @@ async function generateReading(params) {
       dob: params.dob,
       birthplace: params.birthplace,
       tradition: params.tradition,
-      photoHashPresent: !!params.photoHash
+      photoHashPresent: !!params.photoHash,
+      palmEvidence: params.palmEvidence || null
     };
 
     const review = await callAIReviewer(

@@ -77,6 +77,7 @@
  * @param {string} params.userContext.birthplace - Birth location
  * @param {string} params.userContext.tradition - Tradition
  * @param {boolean} params.userContext.photoHashPresent - Whether palm photo provided
+ * @param {Object|null} [params.userContext.palmEvidence] - Verified geometric palm evidence (MODE B) or null (MODE A)
  * @returns {Object} Review result
  * @property {number} overallScore - Mean of 9 category scores (1-10, one decimal)
  * @property {Object} scores - Individual category scores (1-10, one decimal)

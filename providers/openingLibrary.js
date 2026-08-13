@@ -352,7 +352,20 @@ function hashString(str) {
 }
 
 /**
- * Checks if palm evidence is present and valid
+ * Checks if palm evidence is present and valid.
+ *
+ * Two evidence shapes are recognized:
+ *
+ * 1. Geometric evidence (Phase 3A): { palmBounds, fingerRatios,
+ *    geometricRatios, palmAngle } — normalized measurements extracted from
+ *    MediaPipe Hands landmarks. These are pure geometric ratios, NOT palm
+ *    line/mount/mark observations. Geometric evidence enables MODE B selection
+ *    but does NOT permit templates that claim to read specific lines or mounts.
+ *
+ * 2. Observational evidence (legacy): { lines, mounts, markings, fingers }
+ *    — arrays of specific palm features. Templates using MODE B observational
+ *    categories require this evidence and are filtered by templateMatchesEvidence().
+ *
  * @param {Object|null} palmEvidence - Structured palm analysis evidence
  * @returns {boolean} True if verified palm evidence exists
  */
@@ -360,12 +373,15 @@ function hasVerifiedPalmEvidence(palmEvidence) {
     if (!palmEvidence || typeof palmEvidence !== 'object') {
         return false;
     }
-    // Must have at least one observed feature
-    const hasObservations = !!(palmEvidence.lines && palmEvidence.lines.length > 0);
-    const hasMounts = !!(palmEvidence.mounts && palmEvidence.mounts.length > 0);
-    const hasMarkings = !!(palmEvidence.markings && palmEvidence.markings.length > 0);
-    const hasFingers = !!(palmEvidence.fingers && palmEvidence.fingers.length > 0);
-    return hasObservations || hasMounts || hasMarkings || hasFingers;
+    // Phase 3A geometric evidence shape
+    var hasGeometry = !!(palmEvidence.palmBounds && palmEvidence.fingerRatios &&
+        palmEvidence.geometricRatios && typeof palmEvidence.palmAngle === 'number');
+    // Legacy observational evidence shape
+    var hasObservations = !!(palmEvidence.lines && palmEvidence.lines.length > 0);
+    var hasMounts = !!(palmEvidence.mounts && palmEvidence.mounts.length > 0);
+    var hasMarkings = !!(palmEvidence.markings && palmEvidence.markings.length > 0);
+    var hasFingers = !!(palmEvidence.fingers && palmEvidence.fingers.length > 0);
+    return hasGeometry || hasObservations || hasMounts || hasMarkings || hasFingers;
 }
 
 /**

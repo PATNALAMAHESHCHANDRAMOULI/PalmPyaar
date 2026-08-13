@@ -1,10 +1,11 @@
 const crypto = require('crypto');
 const templateProvider = require('../providers/templateProvider');
 const groqProvider = require('../providers/groqProvider');
+const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
 
 /**
  * Vercel Serverless Function: GET /api/generate-reading
- * Receives: { name, dob, birthplace, tradition, photoHash, orderId, token }
+ * Receives: { name, dob, birthplace, tradition, photoHash, palmEvidence, orderId, token }
  * Security: Recomputes HMAC-SHA256 over received parameters using process.env.TOKEN_SECRET
  * Returns: { success: true, reading: { core, love, pro } }
  */
@@ -26,6 +27,23 @@ module.exports = async function handler(req, res) {
     const photoHash = String(params.photoHash || '');
     const orderId = String(params.orderId || '');
     const token = String(params.token || '');
+
+    // Security Decision: palmEvidence is optional. When present (from the signed
+    // result URL), validate it with the strict server-side whitelist before
+    // forwarding to the provider. If it fails validation, reject — never trust
+    // malformed evidence.
+    var palmEvidence = null;
+    if (params.palmEvidence) {
+      try {
+        palmEvidence = JSON.parse(typeof params.palmEvidence === 'string' ? params.palmEvidence : JSON.stringify(params.palmEvidence));
+      } catch (e) {
+        palmEvidence = null;
+      }
+      if (!isValidPalmEvidence(palmEvidence)) {
+        console.warn('[generate-reading] Invalid palmEvidence received; proceeding without it');
+        palmEvidence = null;
+      }
+    }
 
     // Security Decision: TOKEN_SECRET environment variable is mandatory.
     const secret = process.env.TOKEN_SECRET;
@@ -50,8 +68,12 @@ module.exports = async function handler(req, res) {
         });
       }
 
-      // Security Decision: Recompute HMAC-SHA256 signature server-side over identical payload string used during payment verification.
-      const rawPayload = [name, dob, birthplace, tradition, photoHash, orderId].join(':');
+       // Security Decision: Recompute HMAC-SHA256 signature server-side over
+       // identical payload string used during payment verification. palmEvidence
+       // (if present) is stringified and included between photoHash and orderId
+       // to match the verify-razorpay token minting exactly.
+       var palmEvidenceStr = palmEvidence ? JSON.stringify(palmEvidence) : '';
+       var rawPayload = [name, dob, birthplace, tradition, photoHash, palmEvidenceStr, orderId].join(':');
       const expectedToken = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex');
 
       // Security Decision: Use timingSafeEqual to prevent side-channel timing attacks during token comparison.
@@ -79,7 +101,8 @@ module.exports = async function handler(req, res) {
       dob,
       birthplace,
       tradition,
-      photoHash
+      photoHash,
+      palmEvidence
     });
 
     console.log('[generate-reading] Reading generated, sections:', {
