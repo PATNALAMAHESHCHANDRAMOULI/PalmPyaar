@@ -26,6 +26,8 @@
  * @module providers/reviewerPromptBuilder
  */
 
+const { formatPalmGeometryEvidence } = require('./palmGeometryFormatter');
+
 /**
  * Builds the complete prompt for the AI Reviewer.
  * 
@@ -124,6 +126,7 @@ You are NOT a co-writer. You are a critic. Your job is to evaluate, not to rewri
  */
 function buildContextSection({ userContext, tradition, reasoningPlan }) {
     const traditionDisplay = tradition.charAt(0).toUpperCase() + tradition.slice(1);
+    const palmGeometryBlock = formatPalmGeometryEvidence(userContext.palmEvidence);
     
     return `===== CONTEXT =====
 
@@ -133,7 +136,7 @@ USER
 - Birthplace: ${userContext.birthplace}
 - Tradition: ${traditionDisplay}
 - Palm Photo Provided: ${userContext.photoHashPresent ? 'Yes' : 'No'}
-- Palm Evidence: ${userContext.palmEvidence ? 'Verified (geometric measurements)' : 'None'}
+${palmGeometryBlock ? `- Palm Geometry:\n${palmGeometryBlock.split('\n').map(l => '  ' + l).join('\n')}` : '- Palm Evidence: None'}
 
 INTENDED TRADITION FRAMEWORK: ${traditionDisplay}
 - Interpretive Lens: ${reasoningPlan.traditionLens || 'Not specified'}

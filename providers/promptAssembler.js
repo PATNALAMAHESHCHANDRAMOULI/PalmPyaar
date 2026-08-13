@@ -60,6 +60,8 @@ const {
 
 const { planReading } = require('./reasoningPlanner');
 
+const { formatPalmGeometryEvidence } = require('./palmGeometryFormatter');
+
 const PIPELINE_VERSION = '1.0.0';
 
 /**
@@ -145,12 +147,7 @@ function assembleComponents(components, userContext, reasoningPlan) {
     });
 
     // Append USER CONTEXT
-    var palmEvidenceStatus;
-    if (userContext.palmEvidence) {
-        palmEvidenceStatus = 'verified (geometric measurements: palmBounds, fingerRatios, geometricRatios, palmAngle)';
-    } else {
-        palmEvidenceStatus = 'none';
-    }
+    var palmGeometrySection = formatPalmGeometryEvidence(userContext.palmEvidence);
     const userContextSection = [
         '===== USER CONTEXT =====',
         `Name: ${userContext.name}`,
@@ -158,7 +155,7 @@ function assembleComponents(components, userContext, reasoningPlan) {
         `Birthplace: ${userContext.birthplace}`,
         `Tradition: ${userContext.tradition}`,
         `Photo Hash Present: ${userContext.photoHashPresent}`,
-        `Palm Evidence: ${palmEvidenceStatus}`,
+        palmGeometrySection ? palmGeometrySection : 'Palm Evidence: none',
         ''
     ].join('\n');
 
