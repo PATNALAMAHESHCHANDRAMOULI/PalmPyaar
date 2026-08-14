@@ -6,7 +6,7 @@ const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
 /**
  * Vercel Serverless Function: POST /api/create-payment
  *
- * Creates a REAL Razorpay Order for the ₹49 PalmPyaar reading. This replaces
+ * Creates a REAL Razorpay Order for the ₹20 PalmPyaar reading. This replaces
  * the previous direct-UPI deep-link flow (no PSP callback).
  *
    * Accepts { name, dob, birthplace, tradition, photoHash, palmEvidence }.
@@ -23,7 +23,7 @@ const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
  *       orderId,          // internal "PP" + 10 hex chars (Razorpay receipt + token binding)
  *       razorpayOrderId,  // id returned by Razorpay POST /v1/orders
  *       keyId,            // RAZORPAY_KEY_ID (public; required by Razorpay Checkout)
- *       amount,           // rupees (PAYMENT_AMOUNT, default 49)
+ *       amount,           // rupees (PAYMENT_AMOUNT, default 20)
  *       amountPaise,      // amount * 100 (Razorpay expects the smallest currency unit)
  *       currency,         // "INR"
  *       stateToken,       // short-lived server-signed binding of the EXACT reading

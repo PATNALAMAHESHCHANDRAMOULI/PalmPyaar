@@ -4,7 +4,7 @@
  * NOTE: filename kept from the original direct-UPI flow; this file now verifies
  * the Razorpay checkout flow. Asserts:
  *   1. create-payment creates a REAL Razorpay order (razorpayOrderId, keyId,
- *      amount ₹49) and returns no token / result URL
+ *      amount ₹20) and returns no token / result URL
  *   2. server-side orderId generation (format + uniqueness)
  *   3. hand photo (photoHash) is REQUIRED — frontend can't bypass it
  *   4. verify-razorpay verifies the Razorpay signature server-side and mints a
@@ -168,7 +168,7 @@ function webhookSignature(rawBody) {
     // ============================================================
 
     let orderId1, orderId2;
-    await check('create-payment: returns a Razorpay order payload (order id, keyId, ₹49), no token', async () => {
+    await check('create-payment: returns a Razorpay order payload (order id, keyId, ₹20), no token', async () => {
         const restore = installFetchMock({ id: RZ_ORDER });
         try {
             await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET }, async () => {
@@ -180,8 +180,8 @@ function webhookSignature(rawBody) {
                 assertTrue(p && typeof p === 'object', 'payment object');
                 assertEqual(p.razorpayOrderId, RZ_ORDER, 'razorpayOrderId echoed from API');
                 assertEqual(p.keyId, KEY_ID, 'public keyId returned');
-                assertEqual(p.amount, 49, 'amount default 49');
-                assertEqual(p.amountPaise, 4900, 'amountPaise = 49*100');
+                assertEqual(p.amount, 20, 'amount default 20');
+                assertEqual(p.amountPaise, 2000, 'amountPaise = 20*100');
                 assertEqual(p.currency, 'INR', 'currency INR');
                 assertTrue(typeof p.stateToken === 'string' && p.stateToken.includes('.'), 'short-lived signed state token returned');
                 assertEqual(p.stateTokenTtlSeconds, 1800, 'state token TTL is 30 minutes');
@@ -355,7 +355,7 @@ function webhookSignature(rawBody) {
     const webhookEvent = {
         event: 'payment.captured',
         payload: {
-            payment: { entity: { id: RZ_PAYMENT, amount: 4900 } },
+            payment: { entity: { id: RZ_PAYMENT, amount: 2000 } },
             order: { entity: { id: RZ_ORDER } }
         }
     };

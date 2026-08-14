@@ -17,7 +17,7 @@
   var currentOrderId = '';
   var currentStateToken = '';
   var rzpInstance = null;
-  var DEFAULT_BTN_TEXT = 'Unlock full reading \u2014 \u20B949';
+  var DEFAULT_BTN_TEXT = 'Unlock full reading \u2014 \u20B920';
 
   function $(id) {
     return document.getElementById(id);

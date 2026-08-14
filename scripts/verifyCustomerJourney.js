@@ -103,7 +103,7 @@ async function createPaidOrder() {
     const restore = installFetchMock({ id: RZ_ORDER });
     try {
         let payment = null;
-        await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '49' }, async () => {
+        await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '20' }, async () => {
             const res = makeRes();
             await require('../api/create-payment')(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
             if (res.statusCode !== 200) throw new Error('create-payment failed: ' + JSON.stringify(res._json));
@@ -192,13 +192,13 @@ async function verifyAndGetResultUrl(payment, overrides) {
     await check('STEP 2: create-payment returns a Razorpay order', async () => {
         const restore = installFetchMock({ id: RZ_ORDER });
         try {
-            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '49' }, async () => {
+            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '20' }, async () => {
                 const res = makeRes();
                 await createPayment(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
                 assertEqual(res.statusCode, 200, 'status');
                 assertEqual(res._json.payment.razorpayOrderId, RZ_ORDER, 'razorpay order id');
                 assertEqual(res._json.payment.keyId, KEY_ID, 'keyId for Checkout');
-                assertEqual(res._json.payment.amountPaise, 4900, 'amountPaise');
+                assertEqual(res._json.payment.amountPaise, 2000, 'amountPaise');
             });
         } finally {
             restore();

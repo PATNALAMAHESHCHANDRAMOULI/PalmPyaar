@@ -211,14 +211,14 @@ function rzSignature(orderId, paymentId) {
     await check('create-payment: success -> 200 with real order, never leaks secret', async () => {
         const restore = installFetchMock({ id: RZ_ORDER });
         try {
-            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '49' }, async () => {
+            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '20' }, async () => {
                 const res = makeRes();
                 await createPayment(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
                 assertEqual(res.statusCode, 200, 'status');
                 const p = res._json.payment;
                 assertEqual(p.razorpayOrderId, RZ_ORDER, 'order id');
                 assertEqual(p.keyId, KEY_ID, 'public keyId returned');
-                assertEqual(p.amountPaise, 4900, 'amountPaise');
+                assertEqual(p.amountPaise, 2000, 'amountPaise');
                 const serialized = JSON.stringify(res._json);
                 assertTrue(!serialized.includes(KEY_SECRET), 'KEY_SECRET must never appear in response');
                 assertTrue(!serialized.includes('keySecret'), 'keySecret field must not exist');
@@ -348,7 +348,7 @@ function rzSignature(orderId, paymentId) {
     const webhookEvent = {
         event: 'payment.captured',
         payload: {
-            payment: { entity: { id: RZ_PAYMENT, amount: 4900 } },
+            payment: { entity: { id: RZ_PAYMENT, amount: 2000 } },
             order: { entity: { id: RZ_ORDER } }
         }
     };
