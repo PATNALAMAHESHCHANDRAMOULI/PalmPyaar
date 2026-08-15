@@ -161,10 +161,13 @@
       body: JSON.stringify({
         name: data.name,
         dob: data.dob,
+        birthTime: data.birthTime,
         birthplace: data.birthplace,
         tradition: data.tradition,
         photoHash: data.photoHash,
         palmEvidence: data.palmEvidence,
+        nakshatraMode: data.nakshatraMode,
+        nakshatra: data.nakshatra,
         orderId: currentOrderId,
         stateToken: currentStateToken,
         razorpayOrderId: response.razorpay_order_id,
