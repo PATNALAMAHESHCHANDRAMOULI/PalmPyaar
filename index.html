@@ -64,15 +64,20 @@
             <input type="text" id="name" name="name" class="field__input field__input--name" autocomplete="name" placeholder="How you'd like to be addressed" required>
           </div>
 
-          <div class="field-row">
+           <div class="field-row">
             <div class="field">
               <label for="dob" class="field__label">Date of birth</label>
               <input type="date" id="dob" name="dob" class="field__input" required>
             </div>
             <div class="field">
-              <label for="birthplace" class="field__label">Birthplace</label>
-              <input type="text" id="birthplace" name="birthplace" class="field__input" autocomplete="off" placeholder="City, country" required>
+              <label for="birth-time" class="field__label">Birth time (optional)</label><span id="birth-time-precision" class="birth-time-precision">Affects Lagna and timing precision</span>
+              <input type="time" id="birth-time" name="birthTime" class="field__input" autocomplete="off" placeholder="HH:MM" step="60">
             </div>
+          </div>
+
+          <div class="field">
+            <label for="birthplace" class="field__label">Birthplace</label>
+            <input type="text" id="birthplace" name="birthplace" class="field__input" autocomplete="off" placeholder="City, country" required>
           </div>
 
           <fieldset class="field field--tradition">
@@ -81,20 +86,68 @@
               <label class="tradition-pill">
                 <input type="radio" name="tradition" value="western" class="tradition-pill__input" checked>
                 <span class="tradition-pill__label">W</span>
-                <span class="tradition-pill__name">Western</span>
+                <span class="tradition-pill__name">Western</span><span class="tradition-pill__desc">Modern tropical astrology</span>
               </label>
               <label class="tradition-pill">
                 <input type="radio" name="tradition" value="vedic" class="tradition-pill__input">
                 <span class="tradition-pill__label">V</span>
-                <span class="tradition-pill__name">Vedic</span>
+                <span class="tradition-pill__name">Vedic</span><span class="tradition-pill__desc">Sidereal astrology with Rashi and Nakshatra</span>
               </label>
               <label class="tradition-pill">
                 <input type="radio" name="tradition" value="hellenic" class="tradition-pill__input">
                 <span class="tradition-pill__label">H</span>
-                <span class="tradition-pill__name">Hellenic</span>
+                <span class="tradition-pill__name">Hellenic</span><span class="tradition-pill__desc">Classical astrology with sect, lots and traditional techniques</span>
               </label>
             </div>
-          </fieldset>
+      <!-- Vedic Nakshatra Selection (shown only in Vedic mode) -->
+      <div id="nakshatra-section" class="field field--nakshatra" hidden>
+        <label class="field__label">Your Nakshatra (Moon constellation)</label>
+        <p class="field__hint">In Vedic astrology, your Nakshatra is determined from the Moon position at birth. If you already know it, select it below. Otherwise PalmPyaar will calculate it from your birth details.</p>
+        <div class="nakshatra-options">
+          <label class="nakshatra-radio">
+            <input type="radio" name="nakshatraMode" value="calculate" checked>
+            <span>Calculate from birth details</span>
+          </label>
+          <label class="nakshatra-radio">
+            <input type="radio" name="nakshatraMode" value="known">
+            <span>I know my Nakshatra</span>
+          </label>
+        </div>
+        <div id="nakshatra-select-wrapper" class="field" hidden>
+          <select id="nakshatra-select" name="nakshatra" class="field__input">
+            <option value="">-- Select your Nakshatra --</option>
+            <option value="Ashwini">Ashwini</option>
+            <option value="Bharani">Bharani</option>
+            <option value="Krittika">Krittika</option>
+            <option value="Rohini">Rohini</option>
+            <option value="Mrigashira">Mrigashira</option>
+            <option value="Ardra">Ardra</option>
+            <option value="Punarvasu">Punarvasu</option>
+            <option value="Pushya">Pushya</option>
+            <option value="Ashlesha">Ashlesha</option>
+            <option value="Magha">Magha</option>
+            <option value="Purva Phalguni">Purva Phalguni</option>
+            <option value="Uttara Phalguni">Uttara Phalguni</option>
+            <option value="Hasta">Hasta</option>
+            <option value="Chitra">Chitra</option>
+            <option value="Swati">Swati</option>
+            <option value="Vishakha">Vishakha</option>
+            <option value="Anuradha">Anuradha</option>
+            <option value="Jyeshtha">Jyeshtha</option>
+            <option value="Mula">Mula</option>
+            <option value="Purva Ashadha">Purva Ashadha</option>
+            <option value="Uttara Ashadha">Uttara Ashadha</option>
+            <option value="Shravana">Shravana</option>
+            <option value="Dhanishtha">Dhanishtha</option>
+            <option value="Shatabhisha">Shatabhisha</option>
+            <option value="Purva Bhadrapada">Purva Bhadrapada</option>
+            <option value="Uttara Bhadrapada">Uttara Bhadrapada</option>
+            <option value="Revati">Revati</option>
+          </select>
+          <p id="nakshatra-conflict" class="checkout-error" hidden></p>
+        </div>
+      </div>
+</fieldset>
 
           <div class="field field--photo">
             <label for="photo" class="field__label">Hand photo (required)</label>

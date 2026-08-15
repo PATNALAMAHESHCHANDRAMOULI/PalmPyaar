@@ -100,7 +100,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    let { name, dob, birthplace, tradition, photoHash, palmEvidence } = body;
+    let { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, nakshatraMode, nakshatra } = body;
 
     if (!name || !dob || !birthplace) {
       return res.status(400).json({
@@ -126,12 +126,40 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid date of birth format.' });
     }
 
+    // birthTime is optional but, when provided, must be valid 24h HH:MM
+    var cleanBirthTime = '';
+    if (birthTime !== undefined && birthTime !== null && birthTime !== '') {
+      cleanBirthTime = String(birthTime).trim();
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(cleanBirthTime)) {
+        return res.status(400).json({ success: false, error: 'Invalid birth time format. Use HH:MM (24-hour).' });
+      }
+    }
+
     // Security Decision: Whitelist the reading tradition so the token payload
     // (and later HMAC) is built from a fixed, known value set.
     const TRADITIONS = ['western', 'vedic', 'hellenic'];
+
+
+
     const selectedTradition = String(tradition || 'western');
     if (!TRADITIONS.includes(selectedTradition)) {
       return res.status(400).json({ success: false, error: 'Invalid reading tradition.' });
+    }
+
+    // Validate Nakshatra inputs for Vedic mode
+    var cleanNakshatraMode = '';
+    var cleanNakshatra = '';
+    if (selectedTradition === 'vedic') {
+      cleanNakshatraMode = String(nakshatraMode || 'calculate').trim();
+      if (!['calculate', 'known'].includes(cleanNakshatraMode)) {
+        cleanNakshatraMode = 'calculate';
+      }
+      if (cleanNakshatraMode === 'known') {
+        cleanNakshatra = String(nakshatra || '').trim();
+        if (!cleanNakshatra) {
+          return res.status(400).json({ success: false, error: 'Nakshatra is required when mode is "known".' });
+        }
+      }
     }
 
     // Security Decision: The hand photo is REQUIRED for the paid reading. The
@@ -220,11 +248,14 @@ module.exports = async function handler(req, res) {
       v: 1,
       razorpayOrderId: razorpayOrder.id,
       name,
-      dob: String(dob),
-      birthplace,
+       dob: String(dob),
+       birthTime: cleanBirthTime,
+       birthplace,
       tradition: selectedTradition,
       photoHash: cleanPhotoHash,
       palmEvidence: cleanPalmEvidence,
+      nakshatraMode: cleanNakshatraMode,
+      nakshatra: cleanNakshatra,
       orderId,
       amount,
       amountPaise,

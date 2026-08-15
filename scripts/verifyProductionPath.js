@@ -141,7 +141,7 @@ function makeReqRes(method, query, body) {
 
     // ---- 6. generate-reading token/auth path ----
     const name = 'Ananya Sharma', dob = '1990-06-15', birthplace = 'Pune', tradition = 'western', orderId = 'PPA1B2C3D4E';
-    const rawPayload = [name, dob, birthplace, tradition, '', '', orderId].join(':');
+    const rawPayload = [name, dob, '', birthplace, tradition, '', '', orderId].join(':');
     const goodToken = crypto.createHmac('sha256', process.env.TOKEN_SECRET).update(rawPayload).digest('hex');
 
     await check('generate-reading: missing token -> 403', async () => {

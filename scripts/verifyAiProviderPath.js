@@ -25,7 +25,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+const DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 let passed = 0;
 let failed = 0;
@@ -217,7 +217,7 @@ function runSuite(script) {
       assertTrue(mock.requests.some((r) => r.type === 'writer'), 'no writer request reached the mock (provider NOT selected)');
     });
 
-    await check('T2: intended model is passed to the provider (llama-3.3-70b-versatile)', () => {
+    await check('T2: intended model is passed to the provider (openai/gpt-oss-120b)', () => {
       const writer = mock.requests.find((r) => r.type === 'writer');
       assertTrue(!!writer, 'no writer request');
       assertTrue(writer.body.model === DEFAULT_MODEL, 'model was ' + writer.body.model);

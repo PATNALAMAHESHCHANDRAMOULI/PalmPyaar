@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const templateProvider = require('../providers/templateProvider');
 const groqProvider = require('../providers/groqProvider');
 const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
+const { calculateChart } = require('../lib/astrologyProvider');
 
 /**
  * Vercel Serverless Function: GET /api/generate-reading
@@ -22,11 +23,14 @@ module.exports = async function handler(req, res) {
 
     const name = String(params.name || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 100);
     const dob = String(params.dob || '');
+    const birthTime = String(params.birthTime || '').trim();
     const birthplace = String(params.birthplace || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 100);
     const tradition = String(params.tradition || 'western');
     const photoHash = String(params.photoHash || '');
     const orderId = String(params.orderId || '');
     const token = String(params.token || '');
+    const nakshatraMode = String(params.nakshatraMode || '').trim();
+    const nakshatra = String(params.nakshatra || '').trim();
 
     // Security Decision: palmEvidence is optional. When present (from the signed
     // result URL), validate it with the strict server-side whitelist before
@@ -73,7 +77,7 @@ module.exports = async function handler(req, res) {
        // (if present) is stringified and included between photoHash and orderId
        // to match the verify-razorpay token minting exactly.
        var palmEvidenceStr = palmEvidence ? JSON.stringify(palmEvidence) : '';
-       var rawPayload = [name, dob, birthplace, tradition, photoHash, palmEvidenceStr, orderId].join(':');
+        var rawPayload = [name, dob, birthTime, birthplace, tradition, photoHash, palmEvidenceStr, orderId].join(':');
       const expectedToken = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex');
 
       // Security Decision: Use timingSafeEqual to prevent side-channel timing attacks during token comparison.
@@ -96,13 +100,26 @@ module.exports = async function handler(req, res) {
     const provider = useAi ? groqProvider : templateProvider;
     console.log('[generate-reading] Selected provider:', provider.name);
 
+    // Compute astrology chart from verified birth parameters.
+    // Only computed when birthTime is provided; falls back gracefully.
+    var astrologyData = null;
+    try {
+      astrologyData = calculateChart(dob, birthTime, birthplace, tradition);
+    } catch (err) {
+      console.warn('[generate-reading] Astrology calculation failed:', err.message);
+    }
+
     const reading = await provider.generateReading({
       name,
       dob,
+      birthTime,
       birthplace,
       tradition,
       photoHash,
-      palmEvidence
+      palmEvidence,
+      astrologyData,
+      nakshatraMode,
+      nakshatra
     });
 
     console.log('[generate-reading] Reading generated, sections:', {
@@ -124,7 +141,8 @@ module.exports = async function handler(req, res) {
       success: true,
       reading,
       provider: providerName,
-      aiGenerated
+      aiGenerated,
+      astrologyData: astrologyData || null
     });
   } catch (err) {
     // Log the real error server-side, but never leak internal details to the client.

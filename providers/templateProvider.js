@@ -1,7 +1,7 @@
 /**
  * PalmPyaar Template Provider
  * Returns deterministic template-based readings using user parameters.
- * Implements the standard Provider Interface: generateReading({ name, dob, birthplace, tradition, photoHash, palmEvidence })
+ * Implements the standard Provider Interface: generateReading({ name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData })
  *
  * SAFETY:
  * - No named palmistry lines (heart, head, life, fate).
@@ -12,6 +12,7 @@
  */
 
 const { formatPalmGeometryEvidence } = require('./palmGeometryFormatter');
+const { formatAstrologyData } = require('./astrologyFormatter');
 
 const SIGNS = [
   { name: 'Capricorn', start: [12, 22], end: [1, 19] },
@@ -62,7 +63,7 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-async function generateReading({ name, dob, birthplace, tradition, photoHash, palmEvidence }) {
+async function generateReading({ name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, nakshatraMode, nakshatra }) {
   const sign = getZodiacSign(dob);
   const tradName = capitalize(tradition) || 'Western';
   const displayName = name || 'Seeker';
@@ -77,8 +78,49 @@ async function generateReading({ name, dob, birthplace, tradition, photoHash, pa
     ? `<p class="reading-paragraph">The measured proportions of your hand geometry add a layer of personal context to this reading. These measurements are used as supporting detail only — they do not predict specific events or outcomes.</p>`
     : '';
 
+  var displayAstrologyData = astrologyData;
+  if (tradition === 'vedic' && nakshatraMode === 'known' && nakshatra) {
+    // User-provided Nakshatra overrides calculated one
+    displayAstrologyData = JSON.parse(JSON.stringify(astrologyData || {}));
+    if (!displayAstrologyData.vedic) displayAstrologyData.vedic = {};
+    if (!displayAstrologyData.vedic.nakshatra) displayAstrologyData.vedic.nakshatra = {};
+    displayAstrologyData.vedic.nakshatra.name = nakshatra;
+    displayAstrologyData.vedic.nakshatra.userProvided = true;
+  }
+
+  const astrologyBlock = formatAstrologyData(displayAstrologyData, tradition);
+  const astrologyHtml = astrologyBlock ? `<div class="reading-section reading-section--astrology"><h3>Celestial Configuration</h3>${astrologyBlock}</div>` : '';
+
+  var traditionSign = sign;
+  var traditionSignLabel = "Sign";
+  if (tradition === "vedic" && astrologyData && astrologyData.vedic) {
+    if (astrologyData.vedic.rashi && astrologyData.vedic.rashi.sign) {
+      traditionSign = astrologyData.vedic.rashi.sign;
+      traditionSignLabel = "Rashi";
+    } else if (astrologyData.signs && astrologyData.signs.moon && astrologyData.signs.moon.sidereal) {
+      traditionSign = astrologyData.signs.moon.sidereal.sign;
+      traditionSignLabel = "Moon Sign";
+    }
+  } else if (tradition === "hellenic" && astrologyData && astrologyData.hellenistic) {
+    if (astrologyData.hellenistic.lots && astrologyData.hellenistic.lots.fortune && astrologyData.hellenistic.lots.fortune.sign) {
+      traditionSign = astrologyData.hellenistic.lots.fortune.sign;
+      traditionSignLabel = "Lot of Fortune";
+    } else if (astrologyData.signs && astrologyData.signs.sun && astrologyData.signs.sun.tropical) {
+      traditionSign = astrologyData.signs.sun.tropical.sign;
+      traditionSignLabel = "Tropical Sun";
+    }
+  } else if (astrologyData && astrologyData.signs && astrologyData.signs.sun) {
+    if (tradition === "western" && astrologyData.signs.sun.tropical) {
+      traditionSign = astrologyData.signs.sun.tropical.sign;
+      traditionSignLabel = "Tropical Sun";
+    } else if (astrologyData.signs.sun.sidereal) {
+      traditionSign = astrologyData.signs.sun.sidereal.sign;
+      traditionSignLabel = "Sidereal Sun";
+    }
+  }
+
   const core = `
-    <p class="reading-paragraph">Your birth configuration in <strong>${safeLocation}</strong> under the <strong>${safeTradition}</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>${sign}</strong>, your profile suggests a reflective temperament that values authenticity over surface.</p>
+    <p class="reading-paragraph">Your birth configuration in <strong>${safeLocation}</strong> under the <strong>${safeTradition}</strong> tradition highlights a natural harmony between your intuitive core and your driven expression. As a <strong>${traditionSign}</strong> (${traditionSignLabel}), your profile suggests a reflective temperament that values authenticity over surface.</p>
     <p class="reading-paragraph">You often notice details others overlook, giving you an understated advantage in long-term endeavors. The pattern here is not repetition for its own sake — it is depth that accumulates quietly over time.</p>
     ${palmGeometryHtml}
   `.trim();
@@ -89,21 +131,20 @@ async function generateReading({ name, dob, birthplace, tradition, photoHash, pa
     <p class="reading-paragraph">Light relationship note: Upcoming months favor clear, honest conversations that bring renewed warmth and mutual understanding to your closest bonds.</p>
   `.trim();
 
+  var proCards = "";
+  if (tradition === "vedic") {
+    proCards = '<div class="pro-card"><h3 class="pro-card__title">Vedic Insight</h3><p class="pro-card__text">Your dasha period emphasizes patience in career milestones while fostering inner balance and spiritual harmony.</p></div>';
+  } else if (tradition === "hellenic") {
+    proCards = '<div class="pro-card"><h3 class="pro-card__title">Hellenic Arc</h3><p class="pro-card__text">The essential dignity of your ruling planet favors strategic choices made during the upcoming lunar cycle.</p></div>';
+  } else {
+    proCards = '<div class="pro-card"><h3 class="pro-card__title">Western Verdict</h3><p class="pro-card__text">Focus on steady personal growth and creative pursuits; clarity arrives as you align with your own rhythm rather than external expectations.</p></div>';
+  }
+
   const pro = `
     <div class="pro-grid">
-      <div class="pro-card">
-        <h3 class="pro-card__title">Western Verdict</h3>
-        <p class="pro-card__text">Focus on steady personal growth and creative pursuits; clarity arrives as Saturn aligns with your focal solar house.</p>
-      </div>
-      <div class="pro-card">
-        <h3 class="pro-card__title">Vedic Insight</h3>
-        <p class="pro-card__text">Your dasha period emphasizes patience in career milestones while fostering inner balance and spiritual harmony.</p>
-      </div>
-      <div class="pro-card">
-        <h3 class="pro-card__title">Hellenic Arc</h3>
-        <p class="pro-card__text">The essential dignity of your ruling planet favors strategic choices made during the upcoming lunar cycle.</p>
-      </div>
+      ${proCards}
     </div>
+    ${astrologyHtml}
     <div class="outlook-box">
       <h3 class="outlook-box__title">12-Month Outlook</h3>
       <p class="outlook-box__text">Q1 & Q2 center on laying strong foundations and organizing key goals. Q3 brings opportunities for expanding social and professional circles. Q4 brings a sense of deep personal completion and fulfillment.</p>

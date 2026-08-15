@@ -465,7 +465,7 @@ Files created/modified:
 Key decisions made:
 - Template fallbacks are explicitly labeled: { provider: 'template', aiGenerated: false, reason: 'missing_api_key' | 'pipeline_not_ready' | 'provider_error' }. A paying customer can never receive an unlabeled template reading presented as AI output.
 - Successful AI output returns { provider: 'groq', aiGenerated, model, fallbackSections, reason }; iGenerated is true only when genuine Groq output (writer or rewriter) is in the final reading.
-- Groq config is read at call time via getProviderConfig() (GROQ_MODEL default llama-3.3-70b-versatile, GROQ_BASE_URL default https://api.groq.com/openai/v1).
+- Groq config is read at call time via getProviderConfig() (GROQ_MODEL default openai/gpt-oss-120b, GROQ_BASE_URL default https://api.groq.com/openai/v1).
 - scripts/verifyAiProviderPath.js verifies provider selection, model, assembled prompt content, controlled failure modes, client-side secret hygiene, and re-runs the 4 existing regression suites.
 
 Tests (all passing):

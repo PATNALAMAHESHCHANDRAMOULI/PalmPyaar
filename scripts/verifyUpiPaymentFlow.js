@@ -244,7 +244,7 @@ function webhookSignature(rawBody) {
             assertEqual(url.searchParams.get('orderId'), payment.orderId, 'orderId param');
             assertEqual(url.searchParams.get('photoHash'), PHOTO, 'photoHash param');
             const expected = crypto.createHmac('sha256', SECRET)
-                .update([CUSTOMER.name, CUSTOMER.dob, CUSTOMER.birthplace, CUSTOMER.tradition, PHOTO, '', payment.orderId].join(':'))
+                .update([CUSTOMER.name, CUSTOMER.dob, '', CUSTOMER.birthplace, CUSTOMER.tradition, PHOTO, '', payment.orderId].join(':'))
                 .digest('hex');
             assertEqual(url.searchParams.get('token'), expected, 'token is HMAC over payload');
         });

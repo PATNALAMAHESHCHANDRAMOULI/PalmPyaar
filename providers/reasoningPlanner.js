@@ -365,6 +365,7 @@ function planClosing(tradition, seed) {
  * @param {string} params.tradition - Tradition: 'western' | 'vedic' | 'hellenic'
  * @param {string} [params.photoHash] - Palm photo hash (presence tracked)
  * @param {Object|null} [params.palmEvidence] - Verified geometric palm evidence for MODE B (optional)
+ * @param {Object|null} [params.astrologyData] - Calculated astrology chart data
  * @returns {Object} Narrative plan
  * @property {string} centralTheme - Gravitational center of the reading
  * @property {Array<string>} supportingThemes - 2-3 orbiting themes
@@ -381,6 +382,59 @@ function planClosing(tradition, seed) {
  * @property {string} literaryStyle - Prose style guidance
  * @property {string} traditionLens - Tradition's interpretive lens
  */
+
+/**
+ * Extract structured astrology context from calculated chart data.
+ * Returns a compact object that the prompt assembler can inject into the
+ * reasoning plan without exposing raw coordinates.
+ */
+function extractAstrologyContext(astrologyData, tradition) {
+  if (!astrologyData || typeof astrologyData !== "object") return null;
+  var ctx = { tradition: tradition };
+  if (tradition === "vedic") {
+    if (astrologyData.vedic) {
+      if (astrologyData.vedic.rashi && astrologyData.vedic.rashi.sign) {
+        ctx.rashi = astrologyData.vedic.rashi.sign;
+      }
+      if (astrologyData.vedic.nakshatra && astrologyData.vedic.nakshatra.name) {
+        ctx.nakshatra = astrologyData.vedic.nakshatra.name;
+        if (astrologyData.vedic.nakshatra.pada) ctx.nakshatraPada = astrologyData.vedic.nakshatra.pada;
+      }
+      if (astrologyData.vedic.dasha && astrologyData.vedic.dasha.mahaDasha) {
+        ctx.dashaLord = astrologyData.vedic.dasha.mahaDasha.lord;
+        ctx.dashaBalance = astrologyData.vedic.dasha.mahaDasha.balanceYears;
+      }
+    }
+    if (astrologyData.ascendant && astrologyData.ascendant.sidereal) {
+      ctx.lagna = astrologyData.ascendant.sidereal.sign;
+    }
+  } else if (tradition === "hellenic") {
+    if (astrologyData.hellenistic) {
+      ctx.sect = astrologyData.hellenistic.sect;
+      if (astrologyData.hellenistic.lots && astrologyData.hellenistic.lots.fortune) {
+        ctx.fortune = astrologyData.hellenistic.lots.fortune.sign;
+      }
+      if (astrologyData.hellenistic.lots && astrologyData.hellenistic.lots.spirit) {
+        ctx.spirit = astrologyData.hellenistic.lots.spirit.sign;
+      }
+    }
+    if (astrologyData.ascendant && astrologyData.ascendant.sidereal) {
+      ctx.lagna = astrologyData.ascendant.sidereal.sign;
+    }
+  } else if (tradition === "western") {
+    if (astrologyData.signs && astrologyData.signs.sun) {
+      ctx.sunSign = astrologyData.signs.sun.tropical ? astrologyData.signs.sun.tropical.sign : null;
+    }
+    if (astrologyData.ascendant && astrologyData.ascendant.tropical) {
+      ctx.ascendant = astrologyData.ascendant.tropical.sign;
+    }
+  }
+  if (astrologyData.meta && astrologyData.meta.hadTime === false) {
+    ctx.birthTimeUnavailable = true;
+  }
+  return ctx;
+}
+
 function planReading(params) {
     // Validate required fields
     const required = ['name', 'dob', 'birthplace', 'tradition'];
@@ -396,7 +450,17 @@ function planReading(params) {
     }
 
     const tradition = TRADITION_DEFAULTS[params.tradition];
-    const seed = generateSeed(params);
+    let seed = generateSeed(params);
+
+    // Incorporate astrology context into the plan seed so that different
+    // charts produce different narrative plans.
+    var astrologyContext = null;
+    if (params.astrologyData) {
+      astrologyContext = extractAstrologyContext(params.astrologyData, params.tradition);
+      if (astrologyContext) {
+        seed = hashString(seed + "|" + JSON.stringify(astrologyContext));
+      }
+    }
 
     // Plan all components
     const centralTheme = planCentralTheme(tradition, seed);
@@ -483,7 +547,8 @@ function planReading(params) {
         literaryStyle: tradition.literaryStyle,
         traditionLens: tradition.lens,
         selectedOpening,
-        geometryThemes
+        geometryThemes,
+        astrologyContext
     };
 }
 

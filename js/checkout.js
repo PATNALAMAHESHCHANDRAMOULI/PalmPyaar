@@ -45,6 +45,7 @@
 
     var name = (form.name ? form.name.value : '').trim();
     var dob = (form.dob ? form.dob.value : '').trim();
+    var birthTime = (form.birthTime ? form.birthTime.value : '').trim();
     var birthplace = (form.birthplace ? form.birthplace.value : '').trim();
     var traditionEl = form.querySelector('input[name="tradition"]:checked');
     var tradition = traditionEl ? traditionEl.value : 'western';
@@ -83,14 +84,33 @@
       return null;
     }
 
+    var nakshatraMode = '';
+    var nakshatra = '';
+    if (tradition === 'vedic') {
+      var modeEl = form.querySelector('input[name="nakshatraMode"]:checked');
+      nakshatraMode = modeEl ? modeEl.value : 'calculate';
+      if (nakshatraMode === 'known') {
+        var selectEl = form.querySelector('#nakshatra-select');
+        nakshatra = selectEl ? selectEl.value : '';
+        if (!nakshatra) {
+          setError('Please select your Nakshatra or choose "Calculate from birth details".');
+          if (selectEl) selectEl.focus();
+          return null;
+        }
+      }
+    }
+
     setError('');
     return {
       name: name,
       dob: dob,
+      birthTime: birthTime,
       birthplace: birthplace,
       tradition: tradition,
       photoHash: photoHash,
-      palmEvidence: palmEvidence
+      palmEvidence: palmEvidence,
+      nakshatraMode: nakshatraMode,
+      nakshatra: nakshatra
     };
   }
 
@@ -247,6 +267,16 @@
       });
   }
 
+  function updateNakshatraSection(tradition) {
+    var nakshatraSection = $('nakshatra-section');
+    if (!nakshatraSection) return;
+    if (tradition === 'vedic') {
+      nakshatraSection.hidden = false;
+    } else {
+      nakshatraSection.hidden = true;
+    }
+  }
+
   function init() {
     unlockBtn = $('unlock-btn');
     checkoutError = $('checkout-error');
@@ -258,6 +288,28 @@
         startCheckout();
       });
     }
+
+    // Show/hide Nakshatra section based on tradition
+    document.querySelectorAll('input[name="tradition"]').forEach(function (radio) {
+      radio.addEventListener('change', function () {
+        updateNakshatraSection(radio.value);
+      });
+    });
+
+    // Show/hide Nakshatra select based on mode
+    document.querySelectorAll('input[name="nakshatraMode"]').forEach(function (radio) {
+      radio.addEventListener('change', function () {
+        var selectWrapper = $('nakshatra-select-wrapper');
+        if (selectWrapper) {
+          selectWrapper.hidden = radio.value !== 'known';
+        }
+        var conflictEl = $('nakshatra-conflict');
+        if (conflictEl) {
+          conflictEl.hidden = true;
+          conflictEl.textContent = '';
+        }
+      });
+    });
   }
 
   window.PalmCheckout = {

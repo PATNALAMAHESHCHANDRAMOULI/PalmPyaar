@@ -17,7 +17,7 @@ const OpenAI = require('openai');
 // module. GROQ_API_KEY remains the only required secret for the AI path.
 function getProviderConfig() {
   return {
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     baseURL: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'
   };
 }
@@ -356,10 +356,12 @@ async function generateReading(params) {
     const userContext = {
       name: params.name,
       dob: params.dob,
+      birthTime: params.birthTime || '',
       birthplace: params.birthplace,
       tradition: params.tradition,
       photoHashPresent: !!params.photoHash,
-      palmEvidence: params.palmEvidence || null
+      palmEvidence: params.palmEvidence || null,
+      astrologyData: params.astrologyData || null
     };
 
     const review = await callAIReviewer(
@@ -424,7 +426,86 @@ async function generateReading(params) {
   }
 }
 
+
+/**
+ * Generates an answer to a follow-up question using Groq AI.
+ * Returns an object with an 'answer' property containing HTML.
+ * Falls back to template provider on any error.
+ */
+async function generateAnswer(params) {
+  const question = params.question || '';
+  if (!question) {
+    return { answer: 'Please ask a question.' };
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    return { answer: 'AI answer generation is currently unavailable. Please try again later.' };
+  }
+
+  try {
+    const client = new OpenAI({
+      baseURL: getProviderConfig().baseURL,
+      apiKey: apiKey
+    });
+
+    const astrologyContext = params.astrologyData || {};
+    const tradition = params.tradition || 'western';
+
+    // Build a concise astrology summary for the prompt
+    var astroSummary = '';
+    if (tradition === 'vedic' && astrologyContext.vedic) {
+      astroSummary = 'Vedic: Rashi=' + (astrologyContext.vedic.rashi ? astrologyContext.vedic.rashi.sign : 'N/A') +
+        ', Nakshatra=' + (astrologyContext.vedic.nakshatra ? astrologyContext.vedic.nakshatra.name : 'N/A') +
+        ', Dasha=' + (astrologyContext.vedic.dasha && astrologyContext.vedic.dasha.mahaDasha ? astrologyContext.vedic.dasha.mahaDasha.lord : 'N/A');
+    } else if (tradition === 'hellenic' && astrologyContext.hellenistic) {
+      astroSummary = 'Hellenistic: Sect=' + (astrologyContext.hellenistic.sect || 'N/A') +
+        ', Lot of Fortune=' + (astrologyContext.hellenistic.lots && astrologyContext.hellenistic.lots.fortune ? astrologyContext.hellenistic.lots.fortune.sign : 'N/A');
+    } else if (astrologyContext.signs && astrologyContext.signs.sun) {
+      var sunSign = astrologyContext.signs.sun.tropical ? astrologyContext.signs.sun.tropical.sign : 'N/A';
+      astroSummary = 'Western: Tropical Sun=' + sunSign;
+    }
+
+    const prompt = 'You are a thoughtful astrological interpreter for PalmPyaar, a personalized reading experience. ' +
+      'The user has asked a follow-up question about their reading. ' +
+      'Tradition: ' + tradition + '. ' +
+      'Astrology context: ' + astroSummary + '. ' +
+      'User question: ' + question + '. ' +
+      'Provide a personal, direct, specific answer that references their chart factors where relevant. ' +
+      'For timing questions, give approximate periods (years, ages, windows) when the chart supports it. ' +
+      'Communicate uncertainty naturally. Never claim certainty. ' +
+      'Do not diagnose health, predict death, or make guaranteed medical claims. ' +
+      'Keep the answer concise (3-4 sentences max) and engaging. ' +
+      'Return HTML with <p class="reading-paragraph"> tags.';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const completion = await client.chat.completions.create({
+      model: getProviderConfig().model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.85,
+      max_completion_tokens: 500
+    }, { signal: controller.signal });
+
+    clearTimeout(timeoutId);
+
+    const text = completion.choices[0]?.message?.content || '';
+    if (text && text.trim().length > 0) {
+      return { answer: text.trim() };
+    }
+
+    return { answer: 'I could not generate a specific answer at this moment. Please try asking in a different way.' };
+  } catch (err) {
+    console.warn('[groqProvider] generateAnswer failed:', err.message);
+    return { answer: 'Answer generation encountered an issue. Please try again.' };
+  }
+}
+
+module.exports.generateAnswer = generateAnswer;
+
 module.exports = {
   name: "groq",
-  generateReading
+  generateReading,
+  generateAnswer
 };

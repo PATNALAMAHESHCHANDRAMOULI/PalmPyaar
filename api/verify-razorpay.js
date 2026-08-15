@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const stateToken = require('../lib/stateToken');
 const { expectedAmountRupees, CURRENCY } = require('../lib/paymentConfig');
 const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
+const questionToken = require('../lib/questionToken');
 
 /**
  * Vercel Serverless Function: POST /api/verify-razorpay
@@ -53,18 +54,28 @@ function safeEqualHex(a, b) {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-function buildResultUrl({ name, dob, birthplace, tradition, photoHash, palmEvidence, orderId, token }) {
+function buildResultUrl({ name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, orderId, token, qToken, nakshatraMode, nakshatra }) {
   var params = [
     'name=' + encodeURIComponent(name),
     'dob=' + encodeURIComponent(dob),
+    'birthTime=' + encodeURIComponent(birthTime || ''),
     'birthplace=' + encodeURIComponent(birthplace),
     'tradition=' + encodeURIComponent(tradition),
     'photoHash=' + encodeURIComponent(photoHash),
     'orderId=' + encodeURIComponent(orderId),
     'token=' + token
   ];
+  if (nakshatraMode) {
+    params.push('nakshatraMode=' + encodeURIComponent(nakshatraMode));
+  }
+  if (nakshatra) {
+    params.push('nakshatra=' + encodeURIComponent(nakshatra));
+  }
   if (palmEvidence) {
     params.push('palmEvidence=' + encodeURIComponent(JSON.stringify(palmEvidence)));
+  }
+  if (qToken) {
+    params.push('qToken=' + encodeURIComponent(qToken));
   }
   return '/result.html?' + params.join('&');
 }
@@ -89,7 +100,10 @@ module.exports = async function handler(req, res) {
     const browserDob = String(body.dob || '').trim();
     const browserBirthplace = String(body.birthplace || '').trim().replace(/[\r\n\t]/g, ' ');
     const browserTradition = String(body.tradition || '').trim();
+    const browserBirthTime = String(body.birthTime || '').trim();
     const browserPhotoHash = String(body.photoHash || '').trim().toLowerCase();
+    const browserNakshatraMode = String(body.nakshatraMode || '').trim();
+    const browserNakshatra = String(body.nakshatra || '').trim();
      const browserOrderId = String(body.orderId || '').trim();
 
     // Browser-supplied palmEvidence is cross-checked against the verified state
@@ -159,16 +173,33 @@ module.exports = async function handler(req, res) {
     }
 
     // --- 4. Reading data must EXACTLY match the verified state token. Missing
-    //        or modified name/DOB/birthplace/tradition/photoHash/palmEvidence/orderId
+    //        or modified name/DOB/birthplace/birthTime/tradition/photoHash/palmEvidence/orderId
     //        are rejected — the browser can never mint a reading for other data. ---
     if (
       browserName !== state.name ||
       browserDob !== state.dob ||
+      browserBirthTime !== state.birthTime ||
       browserBirthplace !== state.birthplace ||
       browserTradition !== state.tradition ||
       browserPhotoHash !== state.photoHash ||
       browserOrderId !== state.orderId
     ) {
+
+
+    // Nakshatra data is bound in the state token. Only enforce if browser sends it.
+    // If browser omits it, the state token's value is authoritative (signed).
+    if (browserNakshatraMode && browserNakshatraMode !== (state.nakshatraMode || '')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nakshatra mode does not match the paid order. Please start a new checkout.'
+      });
+    }
+    if (browserNakshatra && browserNakshatra !== (state.nakshatra || '')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nakshatra does not match the paid order. Please start a new checkout.'
+      });
+    }
       return res.status(400).json({
         success: false,
         error: 'Reading data does not match the paid order. Please start a new checkout.'
@@ -217,18 +248,34 @@ module.exports = async function handler(req, res) {
     const palmEvidenceStr = (statePalmEvidence === undefined || statePalmEvidence === null)
       ? ''
       : JSON.stringify(statePalmEvidence);
-    const rawPayload = [state.name, state.dob, state.birthplace, state.tradition, state.photoHash, palmEvidenceStr, state.orderId].join(':');
+    const rawPayload = [state.name, state.dob, state.birthTime, state.birthplace, state.tradition, state.photoHash, palmEvidenceStr, state.orderId].join(':');
     const token = crypto.createHmac('sha256', tokenSecret).update(rawPayload).digest('hex');
+
+    // --- 6b. Create initial question entitlement token ---
+    // The question token wraps the reading token and starts at 0 questions used.
+    // It is signed with TOKEN_SECRET and verified by api/ask-question.js.
+    const qToken = questionToken.createInitialToken(token, tokenSecret, {
+      name: state.name,
+      dob: state.dob,
+      birthTime: state.birthTime,
+      birthplace: state.birthplace,
+      tradition: state.tradition,
+      orderId: state.orderId
+    });
 
     const resultUrl = buildResultUrl({
       name: state.name,
       dob: state.dob,
+      birthTime: state.birthTime,
       birthplace: state.birthplace,
       tradition: state.tradition,
       photoHash: state.photoHash,
       palmEvidence: statePalmEvidence,
       orderId: state.orderId,
-      token
+      token,
+      qToken,
+      nakshatraMode: state.nakshatraMode || '',
+      nakshatra: state.nakshatra || ''
     });
 
     return res.status(200).json({

@@ -98,6 +98,7 @@
     var params = new URLSearchParams(window.location.search);
     var name = params.get('name') || 'Friend';
     var dob = params.get('dob') || '';
+    var birthTime = params.get('birthTime') || '';
     var birthplace = params.get('birthplace') || 'Earth';
     var tradition = params.get('tradition') || 'western';
 
@@ -128,19 +129,45 @@
         console.log("section-core:", document.getElementById("section-core"));
         console.log("section-love:", document.getElementById("section-love"));
         console.log("section-pro:", document.getElementById("section-pro"));
-        // Step 4: Display reading data ONLY after a successful server response
-        if (data && data.success) {
-          var readingData = data.reading || getPlaceholderData(name, dob, birthplace, tradition);
-          console.log("About to render reading...");
-          renderReading(name, dob, birthplace, tradition, readingData);
-          console.log("Render completed.");
+         // Step 4: Display reading data ONLY after a successful server response
+         if (data && data.success) {
+           var readingData = data.reading || getPlaceholderData(name, dob, birthplace, tradition);
+           console.log("About to render reading...");
+           renderReading(name, dob, birthplace, tradition, readingData);
+           console.log("Render completed.");
 
-          if (loadingEl) loadingEl.hidden = true;
-          if (contentEl) {
-            contentEl.hidden = false;
-            contentEl.classList.add('is-visible');
-          }
-        } else {
+           // Show astrology section if birthTime or birthplace is available
+           var astroSection = document.getElementById('astrology-section');
+           var astroContent = document.getElementById('astrology-content');
+           if (astroSection && astroContent) {
+             if (data.astrologyData) {
+               astroContent.innerHTML = formatAstrologyForDisplay(data.astrologyData, tradition);
+               astroSection.hidden = false;
+             } else {
+               astroSection.hidden = true;
+             }
+           }
+
+           // Enable questions section after payment-vered reading is displayed
+           var questionsSection = document.getElementById('questions-section');
+           if (questionsSection) {
+             questionsSection.hidden = false;
+             // Enable the question form (questions.js will initialize the form)
+             var qInput = document.getElementById('question-input');
+             var qSubmit = document.getElementById('question-submit');
+             if (qInput) qInput.disabled = false;
+             if (qSubmit) {
+               qSubmit.disabled = false;
+               qSubmit.setAttribute('aria-disabled', 'false');
+             }
+           }
+
+           if (loadingEl) loadingEl.hidden = true;
+           if (contentEl) {
+             contentEl.hidden = false;
+             contentEl.classList.add('is-visible');
+           }
+         } else {
           throw new Error('Invalid token response');
         }
       })
@@ -151,6 +178,89 @@
         if (contentEl) contentEl.hidden = true;
         if (deniedEl) deniedEl.hidden = false;
       });
+  }
+
+  function formatAstrologyForDisplay(astroData, tradition) {
+    if (!astroData || typeof astroData !== 'object') return '';
+
+    var meta = astroData.meta || {};
+    var signs = astroData.signs || {};
+    var asc = astroData.ascendant || {};
+    var mc = astroData.midheaven || {};
+    var vedic = astroData.vedic || {};
+    var hellenistic = astroData.hellenistic || {};
+
+    function fmtPos(pos) {
+      if (!pos || !pos.sign) return 'unspecified';
+      return pos.sign + ' ' + pos.degrees + '\u00b0' + (pos.minutes || 0) + "'";
+    }
+
+    var html = '<div class="astrology-display">';
+
+    // Ascendant
+    if (asc.sidereal && asc.sidereal.sign) {
+      html += '<div class="astro-card"><div class="astro-card__title">Lagna (Rising)</div><div class="astro-card__content">' + fmtPos(asc.sidereal) + '</div></div>';
+    }
+
+    // Sun & Moon
+    if (signs.sun) {
+      html += '<div class="astro-card"><div class="astro-card__title">Sun</div><div class="astro-card__content">' + fmtPos(signs.sun.sidereal) + '</div></div>';
+    }
+    if (signs.moon) {
+      html += '<div class="astro-card"><div class="astro-card__title">Moon</div><div class="astro-card__content">' + fmtPos(signs.moon.sidereal) + '</div></div>';
+    }
+
+    // MC
+    if (mc.sidereal && mc.sidereal.sign) {
+      html += '<div class="astro-card"><div class="astro-card__title">Midheaven</div><div class="astro-card__content">' + fmtPos(mc.sidereal) + '</div></div>';
+    }
+
+    // Vedic specifics
+    if (tradition === 'vedic') {
+      if (vedic.nakshatra && vedic.nakshatra.name) {
+        html += '<div class="astro-card"><div class="astro-card__title">Nakshatra</div><div class="astro-card__content">' + vedic.nakshatra.name + ' (Pada ' + (vedic.nakshatra.pada || '?') + ')</div></div>';
+      }
+      if (vedic.rashi && vedic.rashi.sign) {
+        html += '<div class="astro-card"><div class="astro-card__title">Rashi (Moon sign)</div><div class="astro-card__content">' + vedic.rashi.sign + ' ' + vedic.rashi.degrees + '\u00b0</div></div>';
+      }
+      if (vedic.dasha && vedic.dasha.mahaDasha) {
+        html += '<div class="astro-card"><div class="astro-card__title">Dasha</div><div class="astro-card__content">' + vedic.dasha.mahaDasha.lord + ' (' + (vedic.dasha.mahaDasha.balanceYears || 0) + ' yrs balance)</div></div>';
+      }
+    }
+
+    // Hellenistic specifics
+    if (tradition === 'hellenic') {
+      if (hellenistic.lots && hellenistic.lots.fortune) {
+        html += '<div class="astro-card"><div class="astro-card__title">Lot of Fortune</div><div class="astro-card__content">' + fmtPos(hellenistic.lots.fortune) + '</div></div>';
+      }
+      if (hellenistic.sect) {
+        html += '<div class="astro-card"><div class="astro-card__title">Sect</div><div class="astro-card__content">' + hellenistic.sect + '</div></div>';
+      }
+    }
+
+    // Planetary summary
+    if (astroData.planets) {
+      var PLANET_NAMES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Rahu', 'Ketu'];
+      var planetParts = [];
+      for (var i = 0; i < PLANET_NAMES.length; i++) {
+        var pname = PLANET_NAMES[i];
+        var p = astroData.planets[pname];
+        if (p && p.sidereal && p.sidereal.sign) {
+          planetParts.push('<span class="astro-planet">' + pname + ': ' + p.sidereal.sign + ' ' + p.sidereal.degrees + '\u00b0</span>');
+        }
+      }
+      if (planetParts.length > 0) {
+        html += '<div class="astro-planets">' + planetParts.join(' ') + '</div>';
+      }
+    }
+
+    // Coordinates
+    if (meta.resolved) {
+      html += '<p class="astro-meta">Coordinates: ' + meta.coordinates.lat.toFixed(2) + '\u00b0, ' + meta.coordinates.lng.toFixed(2) + '\u00b0 \u00b7 ' + meta.timezone + '</p>';
+    }
+
+    html += '</div>';
+    return html;
   }
 
   function initPageReveal() {
