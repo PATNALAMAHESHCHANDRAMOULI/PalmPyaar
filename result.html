@@ -87,6 +87,31 @@
         </section>
       </article>
 
+      <!-- Post-Payment Questions Section -->
+      <section id="questions-section" class="reading-section reading-section--questions" hidden>
+        <h2 class="reading-section__title">05 · Ask a Follow-up Question</h2>
+        <div class="question-header">
+          <p id="question-count" class="question-count">3 questions remaining</p>
+        </div>
+
+        <div id="question-list" class="question-list"></div>
+
+        <form id="question-form" class="question-form">
+          <p id="question-error" class="checkout-error" hidden></p>
+          <div class="field">
+            <label for="question-input" class="field__label">Your question</label>
+            <textarea id="question-input" name="question"
+              class="field__input field__textarea"
+              rows="3" maxlength="500"
+              placeholder="Ask about your reading, relationships, or path..."
+              required></textarea>
+          </div>
+          <button type="submit" id="question-submit" class="btn-unlock" disabled aria-disabled="true">
+            Ask
+          </button>
+        </form>
+      </section>
+
       <footer class="reading-footer">
         <p class="disclaimer">
           <span class="disclaimer__label">Entertainment only</span>
@@ -102,5 +127,6 @@
 
   <script src="content/templates.js"></script>
   <script src="js/reveal.js"></script>
+  <script src="js/questions.js"></script>
 </body>
 </html>
