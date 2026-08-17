@@ -1,6 +1,12 @@
 /*
  * Focused tests for post-payment follow-up question token flow and
  * deterministic answer quality. These tests do not touch payment logic.
+ *
+ * Architecture note: this flow is intentionally database-free/stateless.
+ * HMAC question tokens are tamper-resistant and carry the signed question
+ * count, but a fully stateless server cannot prove that an older valid token
+ * was previously consumed. The browser must rotate to the newly issued token;
+ * the server must never trust an unsigned client-provided count.
  */
 'use strict';
 
@@ -10,11 +16,9 @@ const fs = require('fs');
 const path = require('path');
 const askQuestion = require('../api/ask-question');
 const questionToken = require('../lib/questionToken');
-const questionReplayStore = require('../lib/questionReplayStore');
 const groqProvider = require('../providers/groqProvider');
 
 process.env.TOKEN_SECRET = 'question-flow-test-secret';
-process.env.QUESTION_REPLAY_STORE = 'memory';
 process.env.AI_READING = 'false';
 delete process.env.DEV_BYPASS;
 
@@ -89,7 +93,6 @@ function assertFocusedAnswer(answer, expectedTerms) {
 }
 
 async function testTokenSequence() {
-  questionReplayStore.resetMemoryStore();
   const readingToken = readingTokenFor(base);
   let qToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
 
@@ -126,41 +129,18 @@ async function testTokenSequence() {
   assert.strictEqual(q4.body.success, false);
 }
 
-async function testReplayRejection() {
-  questionReplayStore.resetMemoryStore();
+async function testClientCountIsIgnored() {
   const readingToken = readingTokenFor(base);
-  const originalToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
-
-  const q1 = await post(validBody('When will I get the job?', originalToken, readingToken));
-  assert.strictEqual(q1.statusCode, 200, 'Q1 should succeed');
-  const q1Token = q1.body.questionToken;
-
-  const originalReplay = await post(validBody('Replay original?', originalToken, readingToken));
-  assert.strictEqual(originalReplay.statusCode, 409, 'original qToken replay should be rejected');
-
-  const q2 = await post(validBody('When will I get married?', q1Token, readingToken));
-  assert.strictEqual(q2.statusCode, 200, 'Q2 should succeed');
-  const q2Token = q2.body.questionToken;
-
-  const q1Replay = await post(validBody('Replay Q1 token?', q1Token, readingToken));
-  assert.strictEqual(q1Replay.statusCode, 409, 'Q1 refreshed token replay after Q2 should be rejected');
-
-  const q3 = await post(validBody('Will I move abroad?', q2Token, readingToken));
-  assert.strictEqual(q3.statusCode, 200, 'Q3 should succeed');
-  const finalToken = q3.body.questionToken;
-
-  const q2Replay = await post(validBody('Replay Q2 token?', q2Token, readingToken));
-  assert.strictEqual(q2Replay.statusCode, 409, 'Q2 refreshed token replay after Q3 should be rejected');
-
-  const finalReplay = await post(validBody('Replay final token?', finalToken, readingToken));
-  assert.strictEqual(finalReplay.statusCode, 403, 'final exhausted token should be rejected by max limit');
-
-  const clientCountReset = await post(validBody('Client reset count?', finalToken, readingToken, { questionCount: 0 }));
-  assert.strictEqual(clientCountReset.statusCode, 403, 'client-side question count must not be trusted');
+  let qToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
+  for (let i = 0; i < questionToken.MAX_QUESTIONS; i++) {
+    const res = await post(validBody('Question ' + (i + 1), qToken, readingToken, { questionCount: 0 }));
+    assert.strictEqual(res.statusCode, 200, 'question ' + (i + 1) + ' should succeed before max');
+    qToken = res.body.questionToken;
+  }
+  const blocked = await post(validBody('Client tries to reset count', qToken, readingToken, { questionCount: 0 }));
+  assert.strictEqual(blocked.statusCode, 403, 'client-side questionCount must not bypass signed max count');
 }
-
 async function testTokenFailures() {
-  questionReplayStore.resetMemoryStore();
   const readingToken = readingTokenFor(base);
   const qToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
 
@@ -184,10 +164,17 @@ async function testTokenFailures() {
   const otherQToken = questionToken.createInitialToken(otherReadingToken, process.env.TOKEN_SECRET, otherBase);
   const wrongReading = await post(validBody('Wrong reading?', otherQToken, readingToken));
   assert.strictEqual(wrongReading.statusCode, 403, 'qToken from another reading should be rejected');
+
+  const parts = qToken.split('.');
+  const payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  payload.maxQuestions = questionToken.MAX_QUESTIONS + 1;
+  const tamperedBody = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const tamperedToken = tamperedBody + '.' + parts[1];
+  const tampered = await post(validBody('Tampered token?', tamperedToken, readingToken));
+  assert.strictEqual(tampered.statusCode, 403, 'modified qToken payload should be rejected');
 }
 
 async function testRepresentativeAnswers() {
-  questionReplayStore.resetMemoryStore();
   const readingToken = readingTokenFor(base);
   const cases = [
     ['When will I get the job?', ['career|job']],
@@ -201,7 +188,6 @@ async function testRepresentativeAnswers() {
   for (const [index, entry] of cases.entries()) {
     const question = entry[0];
     const terms = entry[1];
-    questionReplayStore.resetMemoryStore();
     const scopedBase = { ...base, orderId: base.orderId + '_answer_' + index };
     const scopedReadingToken = readingTokenFor(scopedBase);
     const qToken = questionToken.createInitialToken(scopedReadingToken, process.env.TOKEN_SECRET, scopedBase);
@@ -215,7 +201,6 @@ async function testRepresentativeAnswers() {
 }
 
 async function testProviderFailureFallback() {
-  questionReplayStore.resetMemoryStore();
   const readingToken = readingTokenFor(base);
   const qToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
   const originalGenerateAnswer = groqProvider.generateAnswer;
@@ -242,17 +227,26 @@ function testFrontendButtonRecoverySource() {
   assert(source.includes('currentQuestionToken = res.body.questionToken'), 'frontend should replace qToken from server response');
   assert(source.includes('readingToken: currentReadingToken'), 'frontend should keep sending readingToken');
   assert(/else\s*{\s*resetSubmitButton\(\);\s*}/.test(source), 'success path with remaining questions should restore Ask button');
+  assert(source.includes("submitBtn.textContent = 'All questions used'"), 'Q3 should disable and mark all questions used');
   assert(/\.catch\(function \(\) \{[\s\S]*resetSubmitButton\(\);/.test(source), 'failure path should restore Ask button');
   assert(source.includes("Unexpected server response. Please try again."), 'non-JSON responses should be controlled');
 }
 
+function testNoPersistentQuestionStore() {
+  const askSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'ask-question.js'), 'utf8');
+  assert(!askSource.includes('questionReplayStore'), 'ask-question should not depend on persistent replay storage');
+  assert(!fs.existsSync(path.join(__dirname, '..', 'lib', 'questionReplayStore.js')), 'questionReplayStore.js should not exist in database-free architecture');
+}
+
+
 async function run() {
   await testTokenSequence();
-  await testReplayRejection();
+  await testClientCountIsIgnored();
   await testTokenFailures();
   await testRepresentativeAnswers();
   await testProviderFailureFallback();
   testFrontendButtonRecoverySource();
+  testNoPersistentQuestionStore();
   console.log('✅ question flow tests passed');
 }
 

@@ -24,7 +24,6 @@
 
 const crypto = require('crypto');
 const questionToken = require('../lib/questionToken');
-const questionReplayStore = require('../lib/questionReplayStore');
 const templateProvider = require('../providers/templateProvider');
 const groqProvider = require('../providers/groqProvider');
 const { calculateChart } = require('../lib/astrologyProvider');
@@ -206,19 +205,6 @@ module.exports = async function handler(req, res) {
       );
     } else {
       newToken = questionToken.issueNextToken(verifiedPayload, secret, question, answer);
-    }
-
-    const replayResult = await questionReplayStore.consumeQuestionToken({
-      readingToken: verifiedPayload.readingToken,
-      currentToken: questionTokenStr,
-      nextToken: newToken,
-      questionCount: verifiedPayload.questionCount
-    });
-    if (!replayResult.ok) {
-      return res.status(replayResult.status || 409).json({
-        success: false,
-        error: replayResult.error || 'This question token is no longer valid.'
-      });
     }
 
     const remaining = questionToken.getRemainingCount(verifiedPayload) - 1;
