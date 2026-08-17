@@ -277,6 +277,104 @@ function testFrontendButtonRecoverySource() {
   assert(source.includes("Unexpected server response. Please try again."), 'non-JSON responses should be controlled');
 }
 
+async function testFrontendRefreshPersistence() {
+  const questionsUi = require('../js/questions.js');
+  const readingToken = readingTokenFor(base);
+  const urlToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
+
+  assert.strictEqual(questionsUi.chooseEffectiveToken(urlToken, ''), urlToken, 'missing storage should fall back to URL token');
+  const initialPayload = questionsUi.decodeQuestionTokenPayload(urlToken);
+  assert.strictEqual(initialPayload.questionCount, 0, 'initial URL token should decode to count 0');
+
+  const q1 = await post(validBody('When will I get the job?', urlToken, readingToken));
+  assert.strictEqual(q1.statusCode, 200);
+  const afterQ1Token = q1.body.questionToken;
+
+  // Refresh simulation: the URL still carries the ORIGINAL (count 0) token,
+  // exactly as reported in the bug. Storage now holds the Q1 (count 1) token.
+  const effectiveAfterQ1 = questionsUi.chooseEffectiveToken(urlToken, afterQ1Token);
+  assert.strictEqual(effectiveAfterQ1, afterQ1Token, 'refresh after Q1 must restore the Q1 token, not the original URL token');
+  assert.strictEqual(questionsUi.decodeQuestionTokenPayload(effectiveAfterQ1).questionCount, 1);
+
+  const q2 = await post(validBody('When will I get married?', afterQ1Token, readingToken));
+  assert.strictEqual(q2.statusCode, 200);
+  const afterQ2Token = q2.body.questionToken;
+  const effectiveAfterQ2 = questionsUi.chooseEffectiveToken(urlToken, afterQ2Token);
+  assert.strictEqual(effectiveAfterQ2, afterQ2Token, 'refresh after Q2 must restore the Q2 token');
+  assert.strictEqual(questionsUi.decodeQuestionTokenPayload(effectiveAfterQ2).questionCount, 2);
+
+  const q3 = await post(validBody('Will I move abroad?', afterQ2Token, readingToken));
+  assert.strictEqual(q3.statusCode, 200);
+  const afterQ3Token = q3.body.questionToken;
+  const effectiveAfterQ3 = questionsUi.chooseEffectiveToken(urlToken, afterQ3Token);
+  assert.strictEqual(effectiveAfterQ3, afterQ3Token, 'refresh after Q3 must restore the Q3 (exhausted) token');
+  const finalPayload = questionsUi.decodeQuestionTokenPayload(effectiveAfterQ3);
+  assert.strictEqual(finalPayload.questionCount, 3);
+  assert.strictEqual(finalPayload.questions.length, 3, 'restored token must carry full Q&A history for UI restore');
+
+  const q4AfterRefresh = await post(validBody('Can I ask one more?', effectiveAfterQ3, readingToken));
+  assert.strictEqual(q4AfterRefresh.statusCode, 403, 'server must still reject Q4 after a refresh-restored exhausted token');
+}
+
+function testReadingIsolationStorage() {
+  const questionsUi = require('../js/questions.js');
+  const baseA = { ...base, orderId: 'order_reading_A' };
+  const baseB = { ...base, orderId: 'order_reading_B' };
+  const readingTokenA = readingTokenFor(baseA);
+  const readingTokenB = readingTokenFor(baseB);
+
+  const keyA = questionsUi.deriveStorageKey('order_reading_A', readingTokenA);
+  const keyB = questionsUi.deriveStorageKey('order_reading_B', readingTokenB);
+  assert.notStrictEqual(keyA, keyB, 'different readings must use different storage keys');
+
+  const tokenA = questionToken.createInitialToken(readingTokenA, process.env.TOKEN_SECRET, baseA);
+  const tokenAAfterQ = questionToken.issueNextToken(
+    questionToken.verify(tokenA, process.env.TOKEN_SECRET),
+    process.env.TOKEN_SECRET,
+    'Some question?',
+    'Some answer.'
+  );
+  const tokenB = questionToken.createInitialToken(readingTokenB, process.env.TOKEN_SECRET, baseB);
+
+  // A stored token for reading A must never be selected as the effective
+  // token for reading B's URL token, even if a storage key collision were
+  // to somehow occur.
+  const effective = questionsUi.chooseEffectiveToken(tokenB, tokenAAfterQ);
+  assert.strictEqual(effective, tokenB, 'a stored token for a different reading must never be used');
+}
+
+function testMissingStorageFallsBackToUrlToken() {
+  const questionsUi = require('../js/questions.js');
+  const readingToken = readingTokenFor(base);
+  const urlToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
+
+  assert.strictEqual(questionsUi.chooseEffectiveToken(urlToken, ''), urlToken);
+  assert.strictEqual(questionsUi.chooseEffectiveToken(urlToken, null), urlToken);
+  assert.strictEqual(questionsUi.chooseEffectiveToken(urlToken, undefined), urlToken);
+  assert.strictEqual(questionsUi.chooseEffectiveToken(urlToken, 'not-a-real-token'), urlToken, 'corrupt stored value must fall back to URL token');
+}
+
+async function testInvalidStoredTokenDoesNotBypassServer() {
+  const questionsUi = require('../js/questions.js');
+  const readingToken = readingTokenFor(base);
+  const urlToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
+
+  // Simulate a tampered localStorage value: same shape, forged count,
+  // re-signed with a secret the attacker does not actually have — the
+  // server always uses the real TOKEN_SECRET, so this signature can never
+  // verify there, even though the frontend cannot detect the forgery by
+  // decoding alone (it has no access to TOKEN_SECRET to verify with).
+  const forgedPayload = questionToken.decode(urlToken.split('.')[0]);
+  forgedPayload.questionCount = 0;
+  const forgedToken = questionToken.sign(forgedPayload, 'attacker-guessed-secret');
+
+  const chosen = questionsUi.chooseEffectiveToken(urlToken, forgedToken);
+  assert.strictEqual(chosen, forgedToken, 'frontend cannot detect a forged signature by decoding alone');
+
+  const res = await post(validBody('Attempting to bypass with a forged stored token?', chosen, readingToken));
+  assert.strictEqual(res.statusCode, 403, 'server must reject a forged/tampered stored token regardless of frontend choice');
+}
+
 function testNoPersistentQuestionStore() {
   const askSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'ask-question.js'), 'utf8');
   assert(!askSource.includes('questionReplayStore'), 'ask-question should not depend on persistent replay storage');
@@ -291,6 +389,10 @@ async function run() {
   await testRepresentativeAnswers();
   await testProviderFailureFallback();
   await testGenerateAnswerContentHandling();
+  await testFrontendRefreshPersistence();
+  testReadingIsolationStorage();
+  testMissingStorageFallsBackToUrlToken();
+  await testInvalidStoredTokenDoesNotBypassServer();
   testFrontendButtonRecoverySource();
   testNoPersistentQuestionStore();
   console.log('✅ question flow tests passed');
