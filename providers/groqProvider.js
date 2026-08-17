@@ -574,20 +574,46 @@ async function generateAnswer(params) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
+    // NOTE: openai/gpt-oss-120b is a reasoning model that consumes a
+    // significant, variable share of max_completion_tokens on internal
+    // reasoning before emitting visible content. A budget of 500 was
+    // observed in production to be consumed entirely by reasoning, leaving
+    // an empty message.content on effectively every follow-up request.
+    // 1500 matches the budget already used successfully elsewhere in this
+    // file (see callAIReviewer) for the same model.
+    const startedAt = Date.now();
+    const maxCompletionTokens = 1500;
+
     const completion = await client.chat.completions.create({
       model: getProviderConfig().model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.85,
-      max_completion_tokens: 500
+      max_completion_tokens: maxCompletionTokens
     }, { signal: controller.signal });
 
     clearTimeout(timeoutId);
 
-    const text = completion.choices[0]?.message?.content || '';
+    const durationMs = Date.now() - startedAt;
+    const choice = completion.choices && completion.choices[0];
+    const text = choice?.message?.content || '';
+    const finishReason = choice?.finish_reason || 'unknown';
+    const usage = completion.usage || null;
+
     if (text && text.trim().length > 0) {
+      console.log('[groqProvider] generateAnswer: model=' + getProviderConfig().model +
+        ' max_completion_tokens=' + maxCompletionTokens +
+        ' finish_reason=' + finishReason +
+        ' content_length=' + text.trim().length +
+        (usage ? ' completion_tokens=' + usage.completion_tokens : '') +
+        ' duration_ms=' + durationMs);
       return { answer: text.trim() };
     }
 
+    console.warn('[groqProvider] generateAnswer: empty content. model=' + getProviderConfig().model +
+      ' max_completion_tokens=' + maxCompletionTokens +
+      ' finish_reason=' + finishReason +
+      (usage ? ' completion_tokens=' + usage.completion_tokens : '') +
+      ' duration_ms=' + durationMs);
     return { answer: 'I could not generate a specific answer at this moment. Please try asking in a different way.' };
   } catch (err) {
     console.warn('[groqProvider] generateAnswer failed:', err.message);

@@ -17,6 +17,7 @@ const path = require('path');
 const askQuestion = require('../api/ask-question');
 const questionToken = require('../lib/questionToken');
 const groqProvider = require('../providers/groqProvider');
+const OpenAI = require('openai');
 
 process.env.TOKEN_SECRET = 'question-flow-test-secret';
 process.env.AI_READING = 'false';
@@ -222,6 +223,50 @@ async function testProviderFailureFallback() {
   }
 }
 
+async function testGenerateAnswerContentHandling() {
+  const client = new OpenAI({ apiKey: 'test-key' });
+  const completionsProto = Object.getPrototypeOf(client.chat.completions);
+  const originalCreate = completionsProto.create;
+
+  process.env.GROQ_API_KEY = 'test-key';
+
+  const answerParams = {
+    question: 'When will I get the job?',
+    dob: base.dob,
+    birthTime: base.birthTime,
+    tradition: base.tradition,
+    astrologyData: null,
+    questionIntent: { topic: 'career/job', timing: true }
+  };
+
+  try {
+    completionsProto.create = async function () {
+      return {
+        choices: [{ message: { content: '<p class="reading-paragraph">Mock non-empty Groq answer.</p>' }, finish_reason: 'stop' }],
+        usage: { completion_tokens: 42 }
+      };
+    };
+    const nonEmptyResult = await groqProvider.generateAnswer(answerParams);
+    assert.strictEqual(nonEmptyResult.answer, '<p class="reading-paragraph">Mock non-empty Groq answer.</p>', 'non-empty content should be returned as-is');
+
+    completionsProto.create = async function () {
+      return {
+        choices: [{ message: { content: '' }, finish_reason: 'length' }],
+        usage: { completion_tokens: 1500 }
+      };
+    };
+    const emptyResult = await groqProvider.generateAnswer(answerParams);
+    assert.strictEqual(
+      emptyResult.answer,
+      'I could not generate a specific answer at this moment. Please try asking in a different way.',
+      'empty content should fall back to the safe generic message'
+    );
+  } finally {
+    completionsProto.create = originalCreate;
+    delete process.env.GROQ_API_KEY;
+  }
+}
+
 function testFrontendButtonRecoverySource() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'questions.js'), 'utf8');
   assert(source.includes('currentQuestionToken = res.body.questionToken'), 'frontend should replace qToken from server response');
@@ -245,6 +290,7 @@ async function run() {
   await testTokenFailures();
   await testRepresentativeAnswers();
   await testProviderFailureFallback();
+  await testGenerateAnswerContentHandling();
   testFrontendButtonRecoverySource();
   testNoPersistentQuestionStore();
   console.log('✅ question flow tests passed');
