@@ -121,20 +121,30 @@
       body: JSON.stringify(payload)
     })
       .then(function (res) {
-        return res.json().then(function (json) {
-          return { status: res.status, body: json };
+        return res.text().then(function (text) {
+          var json = null;
+          try {
+            json = text ? JSON.parse(text) : null;
+          } catch (e) {
+            json = { success: false, error: 'Unexpected server response. Please try again.' };
+          }
+          return { status: res.status, ok: res.ok, body: json };
         });
       })
       .then(function (res) {
-        if (res.body && res.body.success) {
+        if (res.ok && res.body && res.body.success) {
+          if (res.body.questionToken) {
+            currentQuestionToken = res.body.questionToken;
+          } else if (res.body.remainingQuestions > 0) {
+            setError('Question token was not refreshed. Please reload your saved result link before asking again.');
+            resetSubmitButton();
+            return;
+          }
+
           submitted.push({
             question: question,
             answer: res.body.answer || '(No answer generated)'
           });
-
-          if (res.body.questionToken) {
-            currentQuestionToken = res.body.questionToken;
-          }
 
           renderQuestionHistory();
           updateCountDisplay();
@@ -146,6 +156,8 @@
               submitBtn.setAttribute('aria-disabled', 'true');
               submitBtn.textContent = 'All questions used';
             }
+          } else {
+            resetSubmitButton();
           }
 
           if (questionInput) questionInput.value = '';
@@ -177,7 +189,9 @@
       tradition: params.get('tradition') || 'western',
       photoHash: params.get('photoHash') || '',
       orderId: params.get('orderId') || '',
-      palmEvidence: params.get('palmEvidence') || null
+      palmEvidence: params.get('palmEvidence') || null,
+      nakshatraMode: params.get('nakshatraMode') || '',
+      nakshatra: params.get('nakshatra') || ''
     };
 
     currentQuestionToken = params.get('qToken') || '';

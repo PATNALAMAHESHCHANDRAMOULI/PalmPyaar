@@ -432,6 +432,110 @@ async function generateReading(params) {
  * Returns an object with an 'answer' property containing HTML.
  * Falls back to template provider on any error.
  */
+function compactPosition(pos) {
+  if (!pos || !pos.sign) return null;
+  return {
+    sign: pos.sign,
+    degrees: pos.degrees,
+    minutes: pos.minutes
+  };
+}
+
+function compactPlanet(planet, mode) {
+  if (!planet) return null;
+  const selected = mode === 'sidereal' ? planet.sidereal : planet.tropical;
+  const pos = compactPosition(selected);
+  if (!pos) return null;
+  if (planet.retrograde !== undefined) pos.retrograde = Boolean(planet.retrograde);
+  return pos;
+}
+
+function buildFollowUpAstrologyContext(astrologyData, tradition) {
+  if (!astrologyData || typeof astrologyData !== 'object') {
+    return { tradition: tradition || 'western', available: false };
+  }
+
+  const mode = tradition === 'vedic' ? 'sidereal' : 'tropical';
+  const planets = astrologyData.planets || {};
+  const context = {
+    tradition: tradition || (astrologyData.meta && astrologyData.meta.tradition) || 'western',
+    available: true,
+    birthContext: astrologyData.meta ? {
+      dob: astrologyData.meta.dob,
+      birthTime: astrologyData.meta.birthTime,
+      hadBirthTime: astrologyData.meta.hadTime,
+      birthplace: astrologyData.meta.birthplace,
+      timezone: astrologyData.meta.timezone,
+      coordinatesResolved: astrologyData.meta.resolved
+    } : null,
+    angles: {
+      ascendant: compactPosition(astrologyData.ascendant && astrologyData.ascendant[mode]),
+      midheaven: compactPosition(astrologyData.midheaven && astrologyData.midheaven[mode])
+    },
+    luminaries: {
+      sun: compactPlanet(planets.Sun || (astrologyData.signs && astrologyData.signs.sun), mode),
+      moon: compactPlanet(planets.Moon || (astrologyData.signs && astrologyData.signs.moon), mode)
+    },
+    planets: {},
+    houses: astrologyData.houses && Array.isArray(astrologyData.houses.cusps) ? {
+      system: astrologyData.houses.system,
+      cusps: astrologyData.houses.cusps.slice(0, 12).map(compactPosition)
+    } : null
+  };
+
+  const planetNames = tradition === 'vedic'
+    ? ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Rahu', 'Ketu']
+    : ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn'];
+  for (const name of planetNames) {
+    const pos = compactPlanet(planets[name], mode);
+    if (pos) context.planets[name] = pos;
+  }
+
+  if (tradition === 'vedic' && astrologyData.vedic) {
+    const md = astrologyData.vedic.dasha && astrologyData.vedic.dasha.mahaDasha;
+    context.vedic = {
+      rashi: compactPosition(astrologyData.vedic.rashi),
+      lagna: compactPosition(astrologyData.vedic.lagna),
+      nakshatra: astrologyData.vedic.nakshatra ? {
+        name: astrologyData.vedic.nakshatra.name,
+        number: astrologyData.vedic.nakshatra.number,
+        pada: astrologyData.vedic.nakshatra.pada,
+        degrees: astrologyData.vedic.nakshatra.degr,
+        minutes: astrologyData.vedic.nakshatra.minutes
+      } : null,
+      dasha: md ? {
+        mahaDasha: {
+          lord: md.lord,
+          balanceYears: md.balanceYears,
+          balanceMonths: md.balanceMonths,
+          balanceDays: md.balanceDays
+        },
+        antardashas: Array.isArray(astrologyData.vedic.dasha.antardashas)
+          ? astrologyData.vedic.dasha.antardashas.slice(0, 5).map(function (ad) {
+              return { lord: ad.lord, years: ad.years };
+            })
+          : []
+      } : null
+    };
+  }
+
+  if (tradition === 'hellenic' && astrologyData.hellenistic) {
+    const lots = astrologyData.hellenistic.lots || {};
+    context.hellenistic = {
+      sect: astrologyData.hellenistic.sect,
+      lots: {
+        fortune: compactPosition(lots.fortune),
+        spirit: compactPosition(lots.spirit),
+        eros: compactPosition(lots.eros),
+        nike: compactPosition(lots.nike)
+      },
+      dignities: astrologyData.hellenistic.dignities || null
+    };
+  }
+
+  return context;
+}
+
 async function generateAnswer(params) {
   const question = params.question || '';
   if (!question) {
@@ -451,32 +555,21 @@ async function generateAnswer(params) {
 
     const astrologyContext = params.astrologyData || {};
     const tradition = params.tradition || 'western';
+    const intent = params.questionIntent || { topic: 'general', timing: false };
+    const followUpAstrologyContext = buildFollowUpAstrologyContext(astrologyContext, tradition);
+    const astroSummary = JSON.stringify(followUpAstrologyContext);
 
-    // Build a concise astrology summary for the prompt
-    var astroSummary = '';
-    if (tradition === 'vedic' && astrologyContext.vedic) {
-      astroSummary = 'Vedic: Rashi=' + (astrologyContext.vedic.rashi ? astrologyContext.vedic.rashi.sign : 'N/A') +
-        ', Nakshatra=' + (astrologyContext.vedic.nakshatra ? astrologyContext.vedic.nakshatra.name : 'N/A') +
-        ', Dasha=' + (astrologyContext.vedic.dasha && astrologyContext.vedic.dasha.mahaDasha ? astrologyContext.vedic.dasha.mahaDasha.lord : 'N/A');
-    } else if (tradition === 'hellenic' && astrologyContext.hellenistic) {
-      astroSummary = 'Hellenistic: Sect=' + (astrologyContext.hellenistic.sect || 'N/A') +
-        ', Lot of Fortune=' + (astrologyContext.hellenistic.lots && astrologyContext.hellenistic.lots.fortune ? astrologyContext.hellenistic.lots.fortune.sign : 'N/A');
-    } else if (astrologyContext.signs && astrologyContext.signs.sun) {
-      var sunSign = astrologyContext.signs.sun.tropical ? astrologyContext.signs.sun.tropical.sign : 'N/A';
-      astroSummary = 'Western: Tropical Sun=' + sunSign;
-    }
-
-    const prompt = 'You are a thoughtful astrological interpreter for PalmPyaar, a personalized reading experience. ' +
-      'The user has asked a follow-up question about their reading. ' +
-      'Tradition: ' + tradition + '. ' +
-      'Astrology context: ' + astroSummary + '. ' +
+    const prompt = 'You are answering the user\'s exact follow-up question about their personalized astrology reading. ' +
+      'Answer the question itself first; do not replace the answer with generic life advice, philosophical filler, or unrelated quotes. ' +
+      'Tradition: ' + tradition + '. Respect this tradition and do not mix terminology from other traditions. ' +
+      'Identified intent: ' + intent.topic + (intent.timing ? ' with timing focus' : '') + '. ' +
+      'Supplied compact astrology context only: ' + (astroSummary || 'none calculated') + '. ' +
       'User question: ' + question + '. ' +
-      'Provide a personal, direct, specific answer that references their chart factors where relevant. ' +
-      'For timing questions, give approximate periods (years, ages, windows) when the chart supports it. ' +
-      'Communicate uncertainty naturally. Never claim certainty. ' +
-      'Do not diagnose health, predict death, or make guaranteed medical claims. ' +
-      'Keep the answer concise (3-4 sentences max) and engaging. ' +
-      'Return HTML with <p class="reading-paragraph"> tags.';
+      'Use only the supplied astrology context. Never invent astrology facts, dates, planetary placements, houses, Dasha periods, transits, Nakshatra information, or unsupported techniques. ' +
+      'For timing questions, provide an approximate period only when supported by actual available timing data; otherwise say the available data cannot derive a reliable timing window and give the strongest supported interpretation. ' +
+      'For intimacy questions, keep the answer professional, non-graphic, and focused on romantic readiness and consent. ' +
+      'Answer directly first, then briefly explain the astrological basis. Do not make guaranteed predictions. ' +
+      'Keep the answer concise (3-4 sentences max). Return HTML with <p class="reading-paragraph"> tags only.';
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);

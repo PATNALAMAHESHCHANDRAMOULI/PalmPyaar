@@ -24,6 +24,7 @@
 
 const crypto = require('crypto');
 const questionToken = require('../lib/questionToken');
+const questionReplayStore = require('../lib/questionReplayStore');
 const templateProvider = require('../providers/templateProvider');
 const groqProvider = require('../providers/groqProvider');
 const { calculateChart } = require('../lib/astrologyProvider');
@@ -173,10 +174,11 @@ module.exports = async function handler(req, res) {
     // The answer is derived from the same template/AI logic as the reading,
     // but focused on the specific question asked.
     let answer;
-    if (useAi && process.env.AROQ_API_KEY) {
-      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, nakshatraMode, nakshatra });
+    const questionIntent = classifyQuestionIntent(question);
+    if (useAi && process.env.GROQ_API_KEY) {
+      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra });
     } else {
-      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, nakshatraMode, nakshatra });
+      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, questionIntent, nakshatraMode, nakshatra });
     }
 
      // --- Issue next token ---
@@ -206,6 +208,19 @@ module.exports = async function handler(req, res) {
       newToken = questionToken.issueNextToken(verifiedPayload, secret, question, answer);
     }
 
+    const replayResult = await questionReplayStore.consumeQuestionToken({
+      readingToken: verifiedPayload.readingToken,
+      currentToken: questionTokenStr,
+      nextToken: newToken,
+      questionCount: verifiedPayload.questionCount
+    });
+    if (!replayResult.ok) {
+      return res.status(replayResult.status || 409).json({
+        success: false,
+        error: replayResult.error || 'This question token is no longer valid.'
+      });
+    }
+
     const remaining = questionToken.getRemainingCount(verifiedPayload) - 1;
     const questionsUsed = verifiedPayload.questionCount + 1;
 
@@ -228,55 +243,153 @@ module.exports = async function handler(req, res) {
 };
 
 /**
+ * Identify the user's follow-up intent. This is used internally only to keep
+ * deterministic fallback answers focused on the actual question.
+ */
+function classifyQuestionIntent(question) {
+  const q = String(question || '').toLowerCase();
+  const intent = {
+    topic: 'general',
+    timing: /\b(when|date|year|age|month|how soon|time|timing|window)\b/.test(q)
+  };
+
+  if (/\b(job|career|work|promotion|interview|profession|business|employment)\b/.test(q)) intent.topic = 'career/job';
+  else if (/\b(money|wealth|income|salary|finance|financial|rich|debt)\b/.test(q)) intent.topic = 'money';
+  else if (/\b(marriage|married|spouse|husband|wife|wedding)\b/.test(q)) intent.topic = 'marriage';
+  else if (/\b(relationship|love|partner|girlfriend|boyfriend|dating|romance|meet someone|crush)\b/.test(q)) intent.topic = 'relationship/love';
+  else if (/\b(virginity|sex|intimacy|intimate|physical closeness)\b/.test(q)) intent.topic = 'intimacy';
+  else if (/\b(education|study|studies|exam|college|university|degree|school)\b/.test(q)) intent.topic = 'education';
+  else if (/\b(travel|abroad|foreign|relocation|relocate|move|migration|overseas)\b/.test(q)) intent.topic = 'travel/relocation';
+  else if (/\b(family|parents|mother|father|sibling|children|child)\b/.test(q)) intent.topic = 'family';
+  else if (/\b(compatible|compatibility|match|synastry)\b/.test(q)) intent.topic = 'compatibility';
+
+  return intent;
+}
+
+function getTopicNoun(topic) {
+  switch (topic) {
+    case 'career/job': return 'career and job prospects';
+    case 'money': return 'money and financial stability';
+    case 'marriage': return 'marriage timing and partnership';
+    case 'relationship/love': return 'love and relationship dynamics';
+    case 'intimacy': return 'romantic intimacy and readiness';
+    case 'education': return 'education and study direction';
+    case 'travel/relocation': return 'travel or relocation prospects';
+    case 'family': return 'family matters';
+    case 'compatibility': return 'compatibility';
+    default: return 'your question';
+  }
+}
+
+function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, nakshatra) {
+  if (!astro || typeof astro !== 'object') {
+    return {
+      label: 'birth-sign context',
+      text: 'your ' + fallbackSign + ' birth-sign context',
+      hasTiming: false,
+      timingText: ''
+    };
+  }
+
+  if (tradition === 'vedic' && astro.vedic) {
+    const rashi = astro.vedic.rashi && astro.vedic.rashi.sign ? astro.vedic.rashi.sign : fallbackSign;
+    var nakshatraName = astro.vedic.nakshatra && astro.vedic.nakshatra.name ? astro.vedic.nakshatra.name : '';
+    if (nakshatraMode === 'known' && nakshatra) nakshatraName = nakshatra + ' (selected by you)';
+    const md = astro.vedic.dasha && astro.vedic.dasha.mahaDasha ? astro.vedic.dasha.mahaDasha : null;
+    const dashaText = md && md.lord ? ', with ' + md.lord + ' Maha Dasha active' : '';
+    const timingText = md && md.lord
+      ? 'The available timing data only shows the current ' + md.lord + ' Maha Dasha' + (Number.isFinite(md.balanceYears) ? ' with about ' + md.balanceYears + ' years of balance' : '') + '; it does not include enough event-specific transit or sub-period dating to name a reliable calendar window.'
+      : '';
+    return {
+      label: 'Vedic chart',
+      text: 'your Vedic chart shows ' + rashi + ' Rashi' + (nakshatraName ? ' and ' + nakshatraName + ' Nakshatra' : '') + dashaText,
+      hasTiming: Boolean(timingText),
+      timingText
+    };
+  }
+
+  if (tradition === 'hellenic' && astro.hellenistic) {
+    const fortune = astro.hellenistic.lots && astro.hellenistic.lots.fortune ? astro.hellenistic.lots.fortune.sign : '';
+    const eros = astro.hellenistic.lots && astro.hellenistic.lots.eros ? astro.hellenistic.lots.eros.sign : '';
+    const sect = astro.hellenistic.sect ? astro.hellenistic.sect + ' sect' : 'sect context';
+    return {
+      label: 'Hellenistic chart',
+      text: 'your Hellenistic chart has ' + sect + (fortune ? ' with Fortune in ' + fortune : '') + (eros ? ' and Eros in ' + eros : ''),
+      hasTiming: false,
+      timingText: ''
+    };
+  }
+
+  const signs = astro.signs || {};
+  const sun = signs.sun && signs.sun.tropical && signs.sun.tropical.sign ? signs.sun.tropical.sign : fallbackSign;
+  const moon = signs.moon && signs.moon.tropical && signs.moon.tropical.sign ? signs.moon.tropical.sign : '';
+  const asc = astro.ascendant && astro.ascendant.tropical && astro.ascendant.tropical.sign ? astro.ascendant.tropical.sign : '';
+  const mc = astro.midheaven && astro.midheaven.tropical && astro.midheaven.tropical.sign ? astro.midheaven.tropical.sign : '';
+  return {
+    label: 'Western chart',
+    text: 'your Western chart shows Tropical Sun in ' + sun + (moon ? ', Moon in ' + moon : '') + (asc ? ', Rising in ' + asc : '') + (mc ? ', and Midheaven in ' + mc : ''),
+    hasTiming: false,
+    timingText: ''
+  };
+}
+
+function buildDirectSentence(intent, factors) {
+  const topic = getTopicNoun(intent.topic);
+  if (intent.timing) {
+    if (factors.hasTiming) {
+      return 'For ' + topic + ', the current implementation does not support a precise date, but it can read the active timing background from your chart.';
+    }
+    return 'For ' + topic + ', I cannot give a reliable date or year from the available chart data.';
+  }
+  return 'For ' + topic + ', the strongest supported answer comes from the chart factors available here, not from a guaranteed prediction.';
+}
+
+/**
  * Generate a deterministic answer using the template provider.
  */
 function generateTemplateAnswer(params) {
   const question = params.question || '';
-  const name = params.name || 'Seeker';
   const sign = getZodiacSign(params.dob);
   const astro = params.astrologyData;
-  const nakshatraMode = params.nakshatraMode;
-  const nakshatra = params.nakshatra;
+  const tradition = params.tradition || 'western';
+  const intent = params.questionIntent || classifyQuestionIntent(question);
+  const factors = getTraditionFactors(astro, tradition, sign, params.nakshatraMode, params.nakshatra);
+  const topic = getTopicNoun(intent.topic);
 
-  // Build a contextual answer that references the user's birth details
-  // and astrological configuration, but never makes guarantees.
   var parts = [];
+  parts.push('<p class="reading-paragraph"><strong>Answer:</strong> ' + escapeHtml(buildDirectSentence(intent, factors)) + '</p>');
 
-  var greeting = '<p class="reading-paragraph">Regarding your question: <em>"' + escapeHtml(question) + '"</em></p>';
-  parts.push(greeting);
-
-  var insight;
-  if (astro && astro.vedic) {
-    const dashaLord = astro.vedic.dasha && astro.vedic.dasha.mahaDasha
-      ? astro.vedic.dasha.mahaDasha.lord : 'the current period';
-    var nakshatraName = astro.vedic.nakshatra ? astro.vedic.nakshatra.name : 'the Moon in a significant Nakshatra';
-    if (nakshatraMode === 'known' && nakshatra) {
-      nakshatraName = nakshatra + ' (your selected Nakshatra)';
-    }
-    insight = '<p class="reading-paragraph">As a ' + (astro.vedic.rashi ? astro.vedic.rashi.sign : sign) +
-      ' with ' + nakshatraName +
-      ', your ' + dashaLord + ' period offers a natural window for reflection on this matter. Consider how the themes of growth and self-understanding can inform your approach.</p>';
-  } else if (astro && astro.hellenistic) {
-    const lot = astro.hellenistic.lots && astro.hellenistic.lots.fortune
-      ? astro.hellenistic.lots.fortune.sign : sign;
-    insight = '<p class="reading-paragraph">From your Hellenic configuration with ' + (astro.hellenistic.sect || 'day') +
-      ' sect and Fortune in ' + lot + ', the planetary condition suggests approaching this question with measured consideration. The lot of Fortune points toward avenues of self-contemplation.</p>';
+  var topicSentence;
+  if (intent.topic === 'career/job') {
+    topicSentence = 'Read specifically for career, this points to practical momentum through focus, preparation, and the professional indicators already present in ' + factors.text + '.';
+  } else if (intent.topic === 'money') {
+    topicSentence = 'Read specifically for money, this favors steadier financial choices over risky leaps, using the temperament shown by ' + factors.text + '.';
+  } else if (intent.topic === 'marriage') {
+    topicSentence = 'Read specifically for marriage, this emphasizes partnership readiness and emotional consistency through ' + factors.text + '.';
+  } else if (intent.topic === 'relationship/love') {
+    topicSentence = 'Read specifically for love, this points to clearer communication and a relationship pattern shaped by ' + factors.text + '.';
+  } else if (intent.topic === 'intimacy') {
+    topicSentence = 'Read professionally for intimacy, this is best understood as timing around trust, emotional readiness, and mutual respect, reflected through ' + factors.text + '.';
+  } else if (intent.topic === 'education') {
+    topicSentence = 'Read specifically for education, this supports disciplined learning and decisions that match the mental rhythm shown by ' + factors.text + '.';
+  } else if (intent.topic === 'travel/relocation') {
+    topicSentence = 'Read specifically for travel or relocation, this suggests movement is most supportive when it is planned around stability rather than escape, based on ' + factors.text + '.';
+  } else if (intent.topic === 'family') {
+    topicSentence = 'Read specifically for family, this highlights patience, boundaries, and emotional steadiness through ' + factors.text + '.';
+  } else if (intent.topic === 'compatibility') {
+    topicSentence = 'For compatibility, this chart can describe your needs and style, but it cannot fully judge another person without their birth context; your side is shown by ' + factors.text + '.';
   } else {
-    insight = '<p class="reading-paragraph">As a ' + sign + ', your natural temperament offers a reflective lens on this inquiry. Consider how the themes of growth, balance, and self-understanding can inform your approach.</p>';
+    topicSentence = 'The available chart context for this question is ' + factors.text + '.';
   }
-  parts.push(insight);
 
-  var reflection = '<blockquote class="reading-quote">The path forward often reveals itself when we pause to observe the question rather than rush toward the answer.</blockquote>';
-  parts.push(reflection);
+  parts.push('<p class="reading-paragraph">' + escapeHtml(topicSentence) + '</p>');
 
-  var closing;
-  if (astro && astro.meta && astro.meta.tradition) {
-    closing = '<p class="reading-paragraph">This reflection draws on your ' + escapeHtml(astro.meta.tradition) +
-      ' celestial configuration. It is offered as thoughtful perspective, not definitive guidance.</p>';
-  } else {
-    closing = '<p class="reading-paragraph">This reflection is offered as thoughtful perspective, not definitive guidance.</p>';
+  if (intent.timing) {
+    const timingSentence = factors.timingText || 'This implementation has natal chart factors but not enough supported timing technique data, such as exact transit windows or complete dated sub-periods, to derive a trustworthy calendar period.';
+    parts.push('<p class="reading-paragraph">' + escapeHtml(timingSentence) + '</p>');
   }
-  parts.push(closing);
+
+  parts.push('<p class="reading-paragraph">This is an astrology-based interpretation for entertainment and reflection, so treat it as guidance rather than a guaranteed outcome.</p>');
 
   return parts.join('\n');
 }

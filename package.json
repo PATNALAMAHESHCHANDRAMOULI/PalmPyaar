@@ -4,7 +4,7 @@
   "description": "PalmPyaar - Personalized palm and zodiac readings",
   "main": "index.html",
   "scripts": {
-    "test": "node scripts/verifyPhase6.js && node scripts/verifyProductionChecks.js && node scripts/verifyProductionPath.js && node scripts/verifyRazorpaySecurity.js && node scripts/verifyAiProviderPath.js && node scripts/verifyPalmValidation.js && node scripts/verifyUpiPaymentFlow.js && node scripts/verifyCustomerJourney.js && node scripts/testPipelineIntegration.js && node scripts/testPalmEvidenceIntegrity.js && node scripts/testOpeningLibrary.js"
+    "test": "node scripts/runAllTests.js"
   },
   "keywords": [
     "palmistry",
