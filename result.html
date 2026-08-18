@@ -69,57 +69,62 @@
         </div>
       </header>
 
-      <!-- Reading Body Sections -->
-      <article class="reading-body">
-        <section class="reading-section">
-          <h2 class="reading-section__title">01 · Core Zodiac & Palm Overview</h2>
-          <div id="section-core" class="reading-section__content"></div>
-        </section>
+       <!-- Reading Body Sections -->
+       <article class="reading-body">
+         <section class="reading-section">
+           <h2 class="reading-section__title">01 · Core Zodiac & Palm Overview</h2>
+           <div id="section-core" class="reading-section__content"></div>
+         </section>
 
-        <section class="reading-section">
-          <h2 class="reading-section__title">02 · Love & Light Relationship Notes</h2>
-          <div id="section-love" class="reading-section__content"></div>
-        </section>
+         <section class="reading-section">
+           <h2 class="reading-section__title">02 · Love & Light Relationship Notes</h2>
+           <div id="section-love" class="reading-section__content"></div>
+         </section>
 
-        <section id="section-pro-wrapper" class="reading-section reading-section--pro">
-          <h2 class="reading-section__title">03 · Extended Traditions & 12-Month Outlook</h2>
-          <div id="section-pro" class="reading-section__content"></div>
-        </section>
-      </article>
+         <section id="section-pro-wrapper" class="reading-section reading-section--pro">
+           <h2 class="reading-section__title">03 · Extended Traditions & 12-Month Outlook</h2>
+           <div id="section-pro" class="reading-section__content"></div>
+         </section>
+       </article>
 
-      <!-- Post-Payment Questions Section -->
-      <section id="questions-section" class="reading-section reading-section--questions" hidden>
-        <h2 class="reading-section__title">05 · Ask a Follow-up Question</h2>
-        <div class="question-header">
-          <p id="question-count" class="question-count">3 questions remaining</p>
-        </div>
+       <!-- Astrology Details Section -->
+       <section id="astrology-section" class="reading-section reading-section--astrology" hidden>
+         <h2 class="reading-section__title">04 · Celestial Configuration</h2>
+         <div id="astrology-content" class="reading-section__content"></div>
+       </section>
 
-        <div id="question-list" class="question-list"></div>
+       <!-- Post-Payment Questions Section -->
+       <section id="questions-section" class="reading-section reading-section--questions" hidden>
+         <h2 class="reading-section__title">05 · Ask a Follow-up Question</h2>
+         <div class="question-header">
+           <p id="question-count" class="question-count">3 questions remaining</p>
+         </div>
 
-        <form id="question-form" class="question-form">
-          <p id="question-error" class="checkout-error" hidden></p>
-          <div class="field">
-            <label for="question-input" class="field__label">Your question</label>
-            <textarea id="question-input" name="question"
-              class="field__input field__textarea"
-              rows="3" maxlength="500"
-              placeholder="Ask about your reading, relationships, or path..."
-              required></textarea>
-          </div>
-          <button type="submit" id="question-submit" class="btn-unlock" disabled aria-disabled="true">
-            Ask
-          </button>
-        </form>
-      </section>
+         <div id="question-list" class="question-list"></div>
+
+         <form id="question-form" class="question-form">
+           <p id="question-error" class="checkout-error" hidden></p>
+           <div class="field">
+             <label for="question-input" class="field__label">Your question</label>
+             <textarea id="question-input" name="question"
+               class="field__input field__textarea"
+               rows="3" maxlength="500"
+               placeholder="Ask about your reading, relationships, or path..."
+               required></textarea>
+           </div>
+           <button type="submit" id="question-submit" class="btn-unlock" disabled aria-disabled="true">
+             Ask
+           </button>
+         </form>
+       </section>
 
       <footer class="reading-footer">
         <p class="disclaimer">
-          <span class="disclaimer__label">Entertainment only</span>
-          PalmPyaar readings are designed for fun and personal reflection. They do not constitute financial, legal, health, or professional predictions.
+          <span class="disclaimer__label">Insight and guidance</span>
+          PalmPyaar readings are interpretive and for personal reflection. They are not a substitute for financial, legal, health, or professional advice.
         </p>
         <p class="footer__links">
-          <a href="index.html" class="link-subtle">Home</a> ·
-          <a href="refund-policy.html" class="link-subtle">Refund Policy</a>
+          <a href="index.html" class="link-subtle">Home</a>
         </p>
       </footer>
     </main>
@@ -127,6 +132,5 @@
 
   <script src="content/templates.js"></script>
   <script src="js/reveal.js"></script>
-  <script src="js/questions.js"></script>
-</body>
+  <script src="js/questions.js"></script></body>
 </html>

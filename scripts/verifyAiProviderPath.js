@@ -140,7 +140,7 @@ const VALID_QUERY = {
 
 function scanClientFilesForSecrets() {
   const dirs = ['js', 'css', 'content'];
-  const files = ['index.html', 'result.html', 'refund-policy.html'];
+  const files = ['index.html', 'result.html'];
   const patterns = [
     /GROQ_API_KEY|GEMINI_API_KEY|XAI_API_KEY|AI_READING\s*=/,
     /gsk_[A-Za-z0-9]{16,}/,
@@ -278,6 +278,11 @@ function runSuite(script) {
   await check('T7: no API secret or AI env reference in client-side/static files', () => {
     const hits = scanClientFilesForSecrets();
     assertTrue(hits.length === 0, 'secret-like patterns found: ' + JSON.stringify(hits.slice(0, 5)));
+  });
+
+  // ---- T7b: refund policy page removed ----
+  await check('T7b: refund-policy.html has been removed (no user-facing refund policy page)', () => {
+    assertTrue(!fs.existsSync(path.join(ROOT, 'refund-policy.html')), 'refund-policy.html must not exist');
   });
 
   // ---- T8: production AI config does not silently use template ----

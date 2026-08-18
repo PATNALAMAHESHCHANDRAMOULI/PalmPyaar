@@ -558,18 +558,32 @@ async function generateAnswer(params) {
     const intent = params.questionIntent || { topic: 'general', timing: false };
     const followUpAstrologyContext = buildFollowUpAstrologyContext(astrologyContext, tradition);
     const astroSummary = JSON.stringify(followUpAstrologyContext);
+    const timingContext = params.timingContext || null;
+    const nameMeaningContext = params.nameMeaningContext || null;
+
+    var derivedContext = '';
+    if (nameMeaningContext && nameMeaningContext.summary) {
+      derivedContext += 'Name meaning (verified source, use as-is): ' + nameMeaningContext.summary + '. ';
+    }
+    if (timingContext && timingContext.supported) {
+      derivedContext += 'Timing window derived from the user\'s birth data (use exactly this): ' +
+        timingContext.label + ' = ' + timingContext.window.text + '. ' +
+        'Reasoning: ' + timingContext.reasoning + '. ';
+    }
 
     const prompt = 'You are answering the user\'s exact follow-up question about their personalized astrology reading. ' +
       'Answer the question itself first; do not replace the answer with generic life advice, philosophical filler, or unrelated quotes. ' +
       'Tradition: ' + tradition + '. Respect this tradition and do not mix terminology from other traditions. ' +
       'Identified intent: ' + intent.topic + (intent.timing ? ' with timing focus' : '') + '. ' +
+      (derivedContext ? 'DERIVED FROM THE USER\'S BIRTH DATA (authoritative, reuse as-is): ' + derivedContext : '') +
       'Supplied compact astrology context only: ' + (astroSummary || 'none calculated') + '. ' +
       'User question: ' + question + '. ' +
-      'Use only the supplied astrology context. Never invent astrology facts, dates, planetary placements, houses, Dasha periods, transits, Nakshatra information, or unsupported techniques. ' +
-      'For timing questions, provide an approximate period only when supported by actual available timing data; otherwise say the available data cannot derive a reliable timing window and give the strongest supported interpretation. ' +
+      'Use only the supplied astrology context and derived context. Never invent astrology facts, dates, planetary placements, houses, Dasha periods, transits, Nakshatra information, or unsupported techniques. ' +
+      'For timing questions, use the derived timing window above as the calendar period when it is provided; never invent a year or period that is not in the supplied context. ' +
+      'For name-meaning questions, use the supplied name meaning and never fabricate an etymology. ' +
       'For intimacy questions, keep the answer professional, non-graphic, and focused on romantic readiness and consent. ' +
-      'Answer directly first, then briefly explain the astrological basis. Do not make guaranteed predictions. ' +
-      'Keep the answer concise (3-4 sentences max). Return HTML with <p class="reading-paragraph"> tags only.';
+      'Answer directly first, then briefly explain the astrological basis. Do not make guaranteed predictions. Use hedged phrasing such as "the chart suggests" and "the strongest period appears to be". ' +
+      'Return concise structured HTML only: use <h4 class="answer-label"> section labels (DIRECT ANSWER, TIMING WINDOW / <topic> WINDOW, WHY THIS PERIOD STANDS OUT, WHY YOUR CHART SHOWS THIS, WHAT TO EXPECT, OUTLOOK) with <p class="reading-paragraph"> paragraphs, plus <p class="answer-window"> for the derived year(s) when timing is provided. No <body>, <html>, or markdown. Keep each section to 1-2 sentences.';
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -614,7 +628,7 @@ async function generateAnswer(params) {
       ' finish_reason=' + finishReason +
       (usage ? ' completion_tokens=' + usage.completion_tokens : '') +
       ' duration_ms=' + durationMs);
-    return { answer: 'I could not generate a specific answer at this moment. Please try asking in a different way.' };
+    return { answer: 'Answer generation is temporarily unavailable. Please try again in a moment.' };
   } catch (err) {
     console.warn('[groqProvider] generateAnswer failed:', err.message);
     return { answer: 'Answer generation encountered an issue. Please try again.' };

@@ -27,6 +27,8 @@ const questionToken = require('../lib/questionToken');
 const templateProvider = require('../providers/templateProvider');
 const groqProvider = require('../providers/groqProvider');
 const { calculateChart } = require('../lib/astrologyProvider');
+const timingEngine = require('../lib/timingEngine');
+const nameMeaning = require('../lib/nameMeaning');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -174,10 +176,19 @@ module.exports = async function handler(req, res) {
     // but focused on the specific question asked.
     let answer;
     const questionIntent = classifyQuestionIntent(question);
+    const timingContext = timingEngine.deriveTimingWindow({
+      astrologyData: astrologyData,
+      tradition: tradition,
+      dob: dob,
+      intent: questionIntent
+    });
+    const nameMeaningContext = questionIntent.topic === 'name-meaning'
+      ? nameMeaning.buildNameMeaningContext(questionIntent.name || name)
+      : null;
     if (useAi && process.env.GROQ_API_KEY) {
-      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra });
+      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext });
     } else {
-      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, questionIntent, nakshatraMode, nakshatra });
+      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext });
     }
 
      // --- Issue next token ---
@@ -236,20 +247,47 @@ function classifyQuestionIntent(question) {
   const q = String(question || '').toLowerCase();
   const intent = {
     topic: 'general',
-    timing: /\b(when|date|year|age|month|how soon|time|timing|window)\b/.test(q)
+    timing: /\b(when|date|year|age|month|how soon|time|timing|window)\b/.test(q),
+    name: null
   };
 
-  if (/\b(job|career|work|promotion|interview|profession|business|employment)\b/.test(q)) intent.topic = 'career/job';
+  // Name-meaning questions are answered from the curated name lexicon.
+  if (/\bname\b/.test(q) && /\b(mean|meaning|significance|origin)\b/.test(q)) {
+    intent.topic = 'name-meaning';
+    intent.name = extractNameFromQuestion(q) || null;
+    return intent;
+  }
+
+  if (/\b(personality|character|temperament|nature|who am i|describe me|inner self)\b/.test(q)) intent.topic = 'personality';
+  else if (/\b(job|career|work|promotion|interview|profession|business|employment)\b/.test(q)) intent.topic = 'career/job';
   else if (/\b(money|wealth|income|salary|finance|financial|rich|debt)\b/.test(q)) intent.topic = 'money';
   else if (/\b(marriage|married|spouse|husband|wife|wedding)\b/.test(q)) intent.topic = 'marriage';
-  else if (/\b(relationship|love|partner|girlfriend|boyfriend|dating|romance|meet someone|crush)\b/.test(q)) intent.topic = 'relationship/love';
+  else if (/\b(relationship|love|partner|girlfriend|boyfriend|dating|romance|meet someone|meet|crush|soulmate)\b/.test(q)) intent.topic = 'relationship/love';
   else if (/\b(virginity|sex|intimacy|intimate|physical closeness)\b/.test(q)) intent.topic = 'intimacy';
   else if (/\b(education|study|studies|exam|college|university|degree|school)\b/.test(q)) intent.topic = 'education';
   else if (/\b(travel|abroad|foreign|relocation|relocate|move|migration|overseas)\b/.test(q)) intent.topic = 'travel/relocation';
-  else if (/\b(family|parents|mother|father|sibling|children|child)\b/.test(q)) intent.topic = 'family';
+  else if (/\b(children|child|baby|kids|progeny)\b/.test(q)) intent.topic = 'children';
+  else if (/\b(family|parents|mother|father|sibling)\b/.test(q)) intent.topic = 'family';
+  else if (/\b(difficult|hard phase|challenging|tough period|bad time|struggle|difficulty|obstacle|low phase)\b/.test(q)) intent.topic = 'difficult-phase';
+  else if (/\b(life direction|purpose|path|what should i do|direction|career change|change my life|next chapter)\b/.test(q)) intent.topic = 'life-direction';
+  else if (/\b(opportunit|future|next steps|luck|good time|good things|success|successful|succeed|achieve)\b/.test(q)) intent.topic = 'opportunities/future';
   else if (/\b(compatible|compatibility|match|synastry)\b/.test(q)) intent.topic = 'compatibility';
 
   return intent;
+}
+
+function extractNameFromQuestion(q) {
+  const patterns = [
+    /\bwhat does (?:my |the )?name ([a-z][a-z']{0,29}) mean\b/,
+    /\bwhat does ([a-z][a-z']{0,29}) mean\b/,
+    /\bmeaning of (?:the )?(?:name )?([a-z][a-z']{0,29})\b/,
+    /\bmy name is ([a-z][a-z']{0,29})\b/
+  ];
+  for (const re of patterns) {
+    const m = String(q).match(re);
+    if (m && m[1] && m[1].length >= 2) return m[1];
+  }
+  return null;
 }
 
 function getTopicNoun(topic) {
@@ -262,18 +300,23 @@ function getTopicNoun(topic) {
     case 'education': return 'education and study direction';
     case 'travel/relocation': return 'travel or relocation prospects';
     case 'family': return 'family matters';
+    case 'children': return 'children and family growth';
     case 'compatibility': return 'compatibility';
+    case 'personality': return 'your core personality';
+    case 'name-meaning': return 'your name meaning';
+    case 'difficult-phase': return 'the current difficult phase';
+    case 'life-direction': return 'your life direction';
+    case 'opportunities/future': return 'opportunities and future prospects';
     default: return 'your question';
   }
 }
 
-function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, nakshatra) {
+function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, nakshatra, dob) {
   if (!astro || typeof astro !== 'object') {
     return {
       label: 'birth-sign context',
       text: 'your ' + fallbackSign + ' birth-sign context',
-      hasTiming: false,
-      timingText: ''
+      signs: {}
     };
   }
 
@@ -282,27 +325,46 @@ function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, naks
     var nakshatraName = astro.vedic.nakshatra && astro.vedic.nakshatra.name ? astro.vedic.nakshatra.name : '';
     if (nakshatraMode === 'known' && nakshatra) nakshatraName = nakshatra + ' (selected by you)';
     const md = astro.vedic.dasha && astro.vedic.dasha.mahaDasha ? astro.vedic.dasha.mahaDasha : null;
-    const dashaText = md && md.lord ? ', with ' + md.lord + ' Maha Dasha active' : '';
-    const timingText = md && md.lord
-      ? 'The available timing data only shows the current ' + md.lord + ' Maha Dasha' + (Number.isFinite(md.balanceYears) ? ' with about ' + md.balanceYears + ' years of balance' : '') + '; it does not include enough event-specific transit or sub-period dating to name a reliable calendar window.'
-      : '';
+    var currentPeriodText = '';
+    try {
+      const birthYear = parseInt(String(dob || '').slice(0, 4), 10);
+      if (md && !isNaN(birthYear)) {
+        const schedule = timingEngine.buildVedicSchedule(astro.vedic.dasha, birthYear, Date.now());
+        if (schedule && schedule.currentMD) {
+          currentPeriodText = ' with ' + (schedule.currentMD.lord.charAt(0).toUpperCase() + schedule.currentMD.lord.slice(1)) + ' Mahadasha active' +
+            (schedule.currentAD ? ' and ' + (schedule.currentAD.lord.charAt(0).toUpperCase() + schedule.currentAD.lord.slice(1)) + ' Antardasha' : '');
+        }
+      }
+    } catch (err) { /* non-fatal: fall back to birth dasha wording */ }
+    const dashaText = md && md.lord && !currentPeriodText ? ', with ' + (md.lord.charAt(0).toUpperCase() + md.lord.slice(1)) + ' Maha Dasha active' : currentPeriodText;
+    const sunPlanet = astro.planets && astro.planets.Sun;
     return {
       label: 'Vedic chart',
-      text: 'your Vedic chart shows ' + rashi + ' Rashi' + (nakshatraName ? ' and ' + nakshatraName + ' Nakshatra' : '') + dashaText,
-      hasTiming: Boolean(timingText),
-      timingText
+      text: rashi + ' Rashi' + (nakshatraName ? ' and ' + nakshatraName + ' Nakshatra' : '') + dashaText + ' in your Vedic chart',
+      signs: {
+        sun: sunPlanet && sunPlanet.sidereal && sunPlanet.sidereal.sign ? sunPlanet.sidereal.sign : rashi,
+        moon: rashi,
+        rising: astro.vedic.lagna && astro.vedic.lagna.sign ? astro.vedic.lagna.sign : (astro.ascendant && astro.ascendant.sidereal && astro.ascendant.sidereal.sign ? astro.ascendant.sidereal.sign : ''),
+        midheaven: astro.midheaven && astro.midheaven.sidereal && astro.midheaven.sidereal.sign ? astro.midheaven.sidereal.sign : ''
+      }
     };
   }
 
   if (tradition === 'hellenic' && astro.hellenistic) {
     const fortune = astro.hellenistic.lots && astro.hellenistic.lots.fortune ? astro.hellenistic.lots.fortune.sign : '';
     const eros = astro.hellenistic.lots && astro.hellenistic.lots.eros ? astro.hellenistic.lots.eros.sign : '';
-    const sect = astro.hellenistic.sect ? astro.hellenistic.sect + ' sect' : 'sect context';
+    const sect = astro.hellenistic.sect ? astro.hellenistic.sect : 'sect context';
+    const sunPlanet = astro.planets && astro.planets.Sun;
+    const moonPlanet = astro.planets && astro.planets.Moon;
     return {
       label: 'Hellenistic chart',
-      text: 'your Hellenistic chart has ' + sect + (fortune ? ' with Fortune in ' + fortune : '') + (eros ? ' and Eros in ' + eros : ''),
-      hasTiming: false,
-      timingText: ''
+      text: 'the ' + sect + (fortune ? ' with Fortune in ' + fortune : '') + (eros ? ' and Eros in ' + eros : '') + ' in your Hellenistic chart',
+      signs: {
+        sun: sunPlanet && sunPlanet.sidereal && sunPlanet.sidereal.sign ? sunPlanet.sidereal.sign : '',
+        moon: moonPlanet && moonPlanet.sidereal && moonPlanet.sidereal.sign ? moonPlanet.sidereal.sign : '',
+        rising: astro.ascendant && astro.ascendant.sidereal && astro.ascendant.sidereal.sign ? astro.ascendant.sidereal.sign : '',
+        midheaven: astro.midheaven && astro.midheaven.sidereal && astro.midheaven.sidereal.sign ? astro.midheaven.sidereal.sign : ''
+      }
     };
   }
 
@@ -313,21 +375,115 @@ function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, naks
   const mc = astro.midheaven && astro.midheaven.tropical && astro.midheaven.tropical.sign ? astro.midheaven.tropical.sign : '';
   return {
     label: 'Western chart',
-    text: 'your Western chart shows Tropical Sun in ' + sun + (moon ? ', Moon in ' + moon : '') + (asc ? ', Rising in ' + asc : '') + (mc ? ', and Midheaven in ' + mc : ''),
-    hasTiming: false,
-    timingText: ''
+    text: 'the Tropical Sun in ' + sun + (moon ? ', Moon in ' + moon : '') + (asc ? ', Rising in ' + asc : '') + (mc ? ', and Midheaven in ' + mc : '') + ' in your Western chart',
+    signs: {
+      sun: sun,
+      moon: moon,
+      rising: asc,
+      midheaven: mc
+    }
   };
 }
 
-function buildDirectSentence(intent, factors) {
+const SHORT_NOUNS = {
+  'career/job': 'career',
+  'money': 'financial',
+  'education': 'study',
+  'marriage': 'marriage',
+  'relationship/love': 'relationship',
+  'intimacy': 'intimacy',
+  'family': 'family',
+  'children': 'family',
+  'travel/relocation': 'relocation',
+  'personality': 'personal',
+  'life-direction': 'life-direction',
+  'opportunities/future': 'opportunity',
+  'compatibility': 'partnership',
+  'general': 'outlook',
+  'difficult-phase': 'phase'
+};
+
+const DIRECT_ANSWERS = {
+  'career/job': 'Your chart shows real professional momentum. The strongest supported reading is that steady, prepared effort carries the most weight right now.',
+  'money': 'Your chart supports steadier financial growth than big risks. Consistent saving and skill-building look like the strongest levers.',
+  'marriage': 'Marriage is strongly supported in your chart. The strongest reading is that partnership works best when emotional readiness and the calendar align.',
+  'relationship/love': 'Your chart points to relationship growth through clearer communication. The pattern improves when needs are expressed directly.',
+  'intimacy': 'For intimacy, the strongest supported reading is that readiness grows through trust and mutual respect rather than pressure.',
+  'education': 'Your chart supports disciplined study. Consistent effort is the strongest factor for exam and degree success.',
+  'travel/relocation': 'Your chart supports a well-planned relocation abroad. It looks strongest when built on preparation rather than escape.',
+  'family': 'Your chart points to family stability through patience and clear boundaries.',
+  'children': 'Your chart shows strong nurturing potential. The strongest reading ties timing to life stability rather than a fixed age.',
+  'personality': 'Your chart describes your core temperament; the strongest factors are shown below.',
+  'life-direction': 'Your chart points to a meaningful shift in direction. The strongest supported reading favors choosing depth over speed.',
+  'opportunities/future': 'Your chart shows promising opportunities ahead. The strongest supported reading is that preparation raises the odds.',
+  'compatibility': 'Your chart describes your partnership needs clearly. It cannot fully judge another person without their own birth data.',
+  'difficult-phase': 'Your chart does indicate a difficult phase right now, but not a permanent one. The strongest supported reading is that this stretch asks for patience and adjustment, and it does lift.',
+  'general': 'Your chart supports a favorable reading of this question. The strongest factors are described below.'
+};
+
+const EXPECT_ANSWERS = {
+  'career/job': 'Expect progress to build in stages rather than one dramatic leap. Preparation and visible effort are what the chart rewards most.',
+  'money': 'Expect steadier gains from consistent habits than from one-off risks. Discipline compounds the most over the period ahead.',
+  'marriage': 'Expect the strongest movement when the window aligns with your own readiness. The chart rewards emotional consistency over pressure.',
+  'relationship/love': 'Expect closeness to deepen when communication is honest and direct. Avoid reading silence as rejection.',
+  'intimacy': 'Expect intimacy to grow as trust does. The healthiest path is mutual comfort, consent, and unhurried connection.',
+  'education': 'Expect the best results from regular, structured study. Consistency beats last-minute effort here.',
+  'travel/relocation': 'Expect the move to work best when it is planned around opportunity rather than escape. Timing and preparation matter more than luck.',
+  'family': 'Expect warmth to return through patience and clear boundaries. Small consistent gestures matter most.',
+  'children': 'Expect family growth to align best with life stability. Readiness matters more than a fixed age.',
+  'personality': 'Expect your natural style to become clearer as you work with it rather than against it.',
+  'life-direction': 'Expect clarity to arrive through action, not waiting. Small aligned steps reveal the path.',
+  'opportunities/future': 'Expect doors to open where you have been preparing. Timing favors those already in motion.',
+  'compatibility': 'Expect partnership to work best when your needs and a partner\'s needs are both voiced. A chart cannot speak for the other person.',
+  'difficult-phase': 'Expect the difficult phase to feel demanding but temporary. The chart shows the pressure easing as you adjust your approach.',
+  'general': 'Expect the pattern described above to unfold gradually, with the strongest results where you apply the most consistent effort.'
+};
+
+const OUTLOOK_ANSWERS = {
+  'career/job': 'The outlook is supportive for steady advancement through the period ahead.',
+  'money': 'The outlook favors building reserves and skills; patience is your strongest asset.',
+  'marriage': 'The outlook for partnership is positive, with the strongest potential around the window shown above.',
+  'relationship/love': 'The relationship outlook improves as communication improves.',
+  'intimacy': 'The outlook favors deeper closeness as trust and comfort grow.',
+  'education': 'The study outlook is favorable with disciplined focus.',
+  'travel/relocation': 'The relocation outlook is favorable for a well-prepared move.',
+  'family': 'The family outlook brightens with patience and steady presence.',
+  'children': 'The family outlook is favorable when life is stable enough to welcome growth.',
+  'personality': 'The self-understanding outlook is strong; the more you work with your natural style, the clearer life choices become.',
+  'life-direction': 'The direction outlook clears as you take consistent, aligned action.',
+  'opportunities/future': 'The future outlook is positive; preparation is the multiplier.',
+  'compatibility': 'The compatibility outlook depends on mutual effort; your side is well-described by the chart.',
+  'difficult-phase': 'The phase outlook is temporary — the chart shows the heaviest stretch easing within the period ahead.',
+  'general': 'The overall outlook is constructive; the strongest gains follow your most consistent effort.'
+};
+
+function buildDirectAnswer(intent, factors, timing) {
   const topic = getTopicNoun(intent.topic);
-  if (intent.timing) {
-    if (factors.hasTiming) {
-      return 'For ' + topic + ', the current implementation does not support a precise date, but it can read the active timing background from your chart.';
-    }
-    return 'For ' + topic + ', I cannot give a reliable date or year from the available chart data.';
+  if (intent.timing && timing && timing.supported) {
+    const shortNoun = SHORT_NOUNS[intent.topic] || topic;
+    return 'For ' + topic + ', your strongest ' + shortNoun + ' window appears around ' + timing.window.text +
+      '. It is derived from the alignment of timing indicators in your chart, not a fixed promise.';
   }
-  return 'For ' + topic + ', the strongest supported answer comes from the chart factors available here, not from a guaranteed prediction.';
+  if (intent.timing) {
+    return 'For ' + topic + ', the available chart data gives a clear direction but no specific calendar year, so the strongest answer is the interpretation below.';
+  }
+  if (intent.topic === 'personality' && factors.signs.sun && factors.signs.rising) {
+    return 'Your chart describes a core ' + factors.signs.sun + ' temperament, presented to the world through a ' +
+      factors.signs.rising + ' style. It is a picture of how your inner and outer energy blend, not a fixed label.';
+  }
+  return DIRECT_ANSWERS[intent.topic] || DIRECT_ANSWERS.general;
+}
+
+function buildWhySentence(intent, factors) {
+  return 'The chart shows ' + factors.text + '.';
+}
+
+function buildExpectSentence(intent) {
+  return EXPECT_ANSWERS[intent.topic] || EXPECT_ANSWERS.general;
+}
+
+function buildOutlookSentence(intent) {
+  return OUTLOOK_ANSWERS[intent.topic] || OUTLOOK_ANSWERS.general;
 }
 
 /**
@@ -339,43 +495,74 @@ function generateTemplateAnswer(params) {
   const astro = params.astrologyData;
   const tradition = params.tradition || 'western';
   const intent = params.questionIntent || classifyQuestionIntent(question);
-  const factors = getTraditionFactors(astro, tradition, sign, params.nakshatraMode, params.nakshatra);
-  const topic = getTopicNoun(intent.topic);
+  const factors = getTraditionFactors(astro, tradition, sign, params.nakshatraMode, params.nakshatra, params.dob);
+  const timing = params.timingContext || timingEngine.deriveTimingWindow({
+    astrologyData: astro,
+    tradition: tradition,
+    dob: params.dob,
+    intent: intent
+  });
+
+  if (intent.topic === 'name-meaning') {
+    return buildNameMeaningTemplateAnswer(params, factors);
+  }
 
   var parts = [];
-  parts.push('<p class="reading-paragraph"><strong>Answer:</strong> ' + escapeHtml(buildDirectSentence(intent, factors)) + '</p>');
 
-  var topicSentence;
-  if (intent.topic === 'career/job') {
-    topicSentence = 'Read specifically for career, this points to practical momentum through focus, preparation, and the professional indicators already present in ' + factors.text + '.';
-  } else if (intent.topic === 'money') {
-    topicSentence = 'Read specifically for money, this favors steadier financial choices over risky leaps, using the temperament shown by ' + factors.text + '.';
-  } else if (intent.topic === 'marriage') {
-    topicSentence = 'Read specifically for marriage, this emphasizes partnership readiness and emotional consistency through ' + factors.text + '.';
-  } else if (intent.topic === 'relationship/love') {
-    topicSentence = 'Read specifically for love, this points to clearer communication and a relationship pattern shaped by ' + factors.text + '.';
-  } else if (intent.topic === 'intimacy') {
-    topicSentence = 'Read professionally for intimacy, this is best understood as timing around trust, emotional readiness, and mutual respect, reflected through ' + factors.text + '.';
-  } else if (intent.topic === 'education') {
-    topicSentence = 'Read specifically for education, this supports disciplined learning and decisions that match the mental rhythm shown by ' + factors.text + '.';
-  } else if (intent.topic === 'travel/relocation') {
-    topicSentence = 'Read specifically for travel or relocation, this suggests movement is most supportive when it is planned around stability rather than escape, based on ' + factors.text + '.';
-  } else if (intent.topic === 'family') {
-    topicSentence = 'Read specifically for family, this highlights patience, boundaries, and emotional steadiness through ' + factors.text + '.';
-  } else if (intent.topic === 'compatibility') {
-    topicSentence = 'For compatibility, this chart can describe your needs and style, but it cannot fully judge another person without their birth context; your side is shown by ' + factors.text + '.';
-  } else {
-    topicSentence = 'The available chart context for this question is ' + factors.text + '.';
-  }
-
-  parts.push('<p class="reading-paragraph">' + escapeHtml(topicSentence) + '</p>');
+  parts.push('<h4 class="answer-label">DIRECT ANSWER</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml(buildDirectAnswer(intent, factors, timing)) + '</p>');
 
   if (intent.timing) {
-    const timingSentence = factors.timingText || 'This implementation has natal chart factors but not enough supported timing technique data, such as exact transit windows or complete dated sub-periods, to derive a trustworthy calendar period.';
-    parts.push('<p class="reading-paragraph">' + escapeHtml(timingSentence) + '</p>');
+    if (timing && timing.supported) {
+      parts.push('<h4 class="answer-label">' + escapeHtml(timing.label) + '</h4>');
+      parts.push('<p class="answer-window">' + escapeHtml(timing.window.text) + '</p>');
+      parts.push('<h4 class="answer-label">WHY THIS PERIOD STANDS OUT</h4>');
+      var whyPeriod = escapeHtml(timing.reasoning) + ' This is the strongest alignment the chart shows for this question, not a fixed promise.';
+      if (timing.indicators && timing.indicators.length > 1) {
+        whyPeriod += ' ' + escapeHtml(timing.indicators[1]) + '.';
+      }
+      parts.push('<p class="reading-paragraph">' + whyPeriod + '</p>');
+    } else {
+      parts.push('<p class="reading-paragraph">The available chart data for this question does not reach a specific calendar year, so the reading below focuses on the strongest supported interpretation.</p>');
+    }
   }
 
-  parts.push('<p class="reading-paragraph">This is an astrology-based interpretation for entertainment and reflection, so treat it as guidance rather than a guaranteed outcome.</p>');
+  parts.push('<h4 class="answer-label">WHY YOUR CHART SHOWS THIS</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml(buildWhySentence(intent, factors)) + '</p>');
+
+  parts.push('<h4 class="answer-label">WHAT TO EXPECT</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml(buildExpectSentence(intent)) + '</p>');
+
+  parts.push('<h4 class="answer-label">OUTLOOK</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml(buildOutlookSentence(intent)) + '</p>');
+
+  return parts.join('\n');
+}
+
+function buildNameMeaningTemplateAnswer(params, factors) {
+  const fallbackName = params.name || '';
+  const context = params.nameMeaningContext ||
+    nameMeaning.buildNameMeaningContext(params.questionIntent && params.questionIntent.name ? params.questionIntent.name : fallbackName);
+
+  var parts = [];
+
+  parts.push('<h4 class="answer-label">DIRECT ANSWER</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml(context.summary) + '</p>');
+
+  parts.push('<h4 class="answer-label">WHY YOUR CHART SHOWS THIS</h4>');
+  if (context.recognized) {
+    parts.push('<p class="reading-paragraph">' + escapeHtml('The meaning of ' + context.name + ' — ' + context.themes + ' — blends with ' + factors.text + '. Names carry the themes we often grow into, and the chart describes how those themes tend to express in your life.') + '</p>');
+  } else if (context.number) {
+    parts.push('<p class="reading-paragraph">' + escapeHtml('The name-number theme blends with ' + factors.text + '. A name number of ' + context.number + ' points to ' + nameMeaning.themeForNumber(context.number) + ', which the chart shows expressing through your core factors.') + '</p>');
+  } else {
+    parts.push('<p class="reading-paragraph">' + escapeHtml('The chart itself describes ' + factors.text + ', which is the strongest reference for how you express your identity.') + '</p>');
+  }
+
+  parts.push('<h4 class="answer-label">WHAT TO EXPECT</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml('Expect your identity to feel most settled when you work with the themes above rather than against them. A name reflects a pattern; the chart shows how it plays out.') + '</p>');
+
+  parts.push('<h4 class="answer-label">OUTLOOK</h4>');
+  parts.push('<p class="reading-paragraph">' + escapeHtml('The outlook is positive: the more you align daily choices with your natural themes, the more cohesive life becomes.') + '</p>');
 
   return parts.join('\n');
 }

@@ -42,7 +42,7 @@ TRANSFORMATION RULES:
 - Interpretation remains interpretation. Do not present literary framing as observed reality.
 - Speculation remains speculation. Do not present possibility as certainty.
 
-ENTERTAINMENT DISCLAIMER: This reading is for entertainment and self-reflection only. It is not professional advice.
+INTERPRETIVE GUIDANCE: This reading is interpretive and for self-reflection. It is not professional advice.
 
 PREMIUM EXPERIENCE OBJECTIVE: Every word earns its place. No filler. No template phrases. The user should feel seen, not processed.`
     };

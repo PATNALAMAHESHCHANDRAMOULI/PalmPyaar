@@ -85,6 +85,14 @@ function validBody(question, qToken, readingToken, overrides = {}) {
   };
 }
 
+function tamperQuestionCount(qToken, newCount) {
+  const parts = qToken.split('.');
+  const payload = questionToken.decode(parts[0]);
+  payload.questionCount = newCount;
+  const tamperedBody = questionToken.encode(payload);
+  return tamperedBody + '.' + parts[1];
+}
+
 function assertFocusedAnswer(answer, expectedTerms) {
   assert(answer && typeof answer === 'string', 'answer should be a string');
   assert(!/Regarding your question|themes of growth|observe the question rather than rush/i.test(answer), 'answer should not use old generic filler');
@@ -96,6 +104,11 @@ function assertFocusedAnswer(answer, expectedTerms) {
 async function testTokenSequence() {
   const readingToken = readingTokenFor(base);
   let qToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
+  const initialPayload = questionToken.verify(qToken, process.env.TOKEN_SECRET);
+  assert(initialPayload, 'initial qToken should verify');
+  assert.strictEqual(initialPayload.questionCount, 0, 'initial qToken should start at count 0');
+  assert.strictEqual(initialPayload.maxQuestions, 3, 'initial qToken should encode maxQuestions 3');
+  assert.deepStrictEqual(initialPayload.questions, [], 'initial qToken should have no answered questions');
 
   const q1 = await post(validBody('When will I get the job?', qToken, readingToken));
   assert.strictEqual(q1.statusCode, 200, 'Q1 should succeed');
@@ -128,6 +141,8 @@ async function testTokenSequence() {
   const q4 = await post(validBody('Can I ask one more?', qToken, readingToken));
   assert.strictEqual(q4.statusCode, 403, 'Q4 should be rejected server-side');
   assert.strictEqual(q4.body.success, false);
+  assert.strictEqual(q4.body.questionsUsed, 3);
+  assert.strictEqual(q4.body.maxQuestions, 3);
 }
 
 async function testClientCountIsIgnored() {
@@ -140,6 +155,21 @@ async function testClientCountIsIgnored() {
   }
   const blocked = await post(validBody('Client tries to reset count', qToken, readingToken, { questionCount: 0 }));
   assert.strictEqual(blocked.statusCode, 403, 'client-side questionCount must not bypass signed max count');
+}
+async function testBrowserSuppliedCountsIgnored() {
+  const readingToken = readingTokenFor(base);
+  const qToken = questionToken.createInitialToken(readingToken, process.env.TOKEN_SECRET, base);
+  const res = await post(validBody('When will I get the job?', qToken, readingToken, {
+    questionCount: 999,
+    remainingQuestions: 999,
+    maxQuestions: 999
+  }));
+
+  assert.strictEqual(res.statusCode, 200, 'server should ignore browser-supplied count fields');
+  assert.strictEqual(res.body.questionsUsed, 1, 'questionsUsed should come from signed qToken count 0');
+  assert.strictEqual(res.body.remainingQuestions, 2, 'remainingQuestions should come from signed qToken count 0');
+  assert.strictEqual(res.body.maxQuestions, 3, 'maxQuestions should come from server constant');
+  assert.strictEqual(questionToken.verify(res.body.questionToken, process.env.TOKEN_SECRET).questionCount, 1);
 }
 async function testTokenFailures() {
   const readingToken = readingTokenFor(base);
@@ -171,8 +201,16 @@ async function testTokenFailures() {
   payload.maxQuestions = questionToken.MAX_QUESTIONS + 1;
   const tamperedBody = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   const tamperedToken = tamperedBody + '.' + parts[1];
+  assert.strictEqual(questionToken.verify(tamperedToken, process.env.TOKEN_SECRET), null, 'modified qToken should fail HMAC verification');
   const tampered = await post(validBody('Tampered token?', tamperedToken, readingToken));
   assert.strictEqual(tampered.statusCode, 403, 'modified qToken payload should be rejected');
+
+  const countTampered = tamperQuestionCount(qToken, 2);
+  const countTamperedRes = await post(validBody('Count-tampered token?', countTampered, readingToken));
+  assert.strictEqual(countTamperedRes.statusCode, 403, 'tampered questionCount should be rejected by API');
+
+  const modifiedReading = await post(validBody('Modified reading token?', qToken, 'b'.repeat(64)));
+  assert.strictEqual(modifiedReading.statusCode, 403, 'modified readingToken should be rejected');
 }
 
 async function testRepresentativeAnswers() {
@@ -196,7 +234,8 @@ async function testRepresentativeAnswers() {
     assert.strictEqual(res.statusCode, 200, question);
     assertFocusedAnswer(res.body.answer, terms);
     if (/when/i.test(question)) {
-      assert(/cannot give a reliable date|cannot derive a trustworthy calendar period|does not support a precise date/i.test(res.body.answer), 'timing answer should be honest about unsupported timing');
+      assert(/\b(19|20)\d{2}\b/.test(res.body.answer), 'timing answer should include a derived calendar window');
+      assert(!/cannot give a reliable date|cannot derive a trustworthy calendar period|does not support a precise date/i.test(res.body.answer), 'timing answer should not use weak fallback language');
     }
   }
 }
@@ -258,8 +297,8 @@ async function testGenerateAnswerContentHandling() {
     const emptyResult = await groqProvider.generateAnswer(answerParams);
     assert.strictEqual(
       emptyResult.answer,
-      'I could not generate a specific answer at this moment. Please try asking in a different way.',
-      'empty content should fall back to the safe generic message'
+      'Answer generation is temporarily unavailable. Please try again in a moment.',
+      'empty content should fall back to the safe technical message'
     );
   } finally {
     completionsProto.create = originalCreate;
@@ -385,6 +424,7 @@ function testNoPersistentQuestionStore() {
 async function run() {
   await testTokenSequence();
   await testClientCountIsIgnored();
+  await testBrowserSuppliedCountsIgnored();
   await testTokenFailures();
   await testRepresentativeAnswers();
   await testProviderFailureFallback();

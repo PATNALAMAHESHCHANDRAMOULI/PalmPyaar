@@ -18,7 +18,9 @@ const suites = [
   'scripts/testPipelineIntegration.js',
   'scripts/testPalmEvidenceIntegrity.js',
   'scripts/testOpeningLibrary.js',
-  'scripts/testQuestionFlow.js'
+  'scripts/testQuestionFlow.js',
+  'scripts/testAnswerQuality.js',
+  'scripts/testTimingEngine.js'
 ];
 
 let failed = 0;
