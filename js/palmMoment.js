@@ -260,7 +260,7 @@
     var sentences = Array.isArray(copy.sentences) ? copy.sentences : [];
     var theme = escapeAttr(copy.theme || 'reflection');
     var html = '<div class="palm-moment__card" data-theme="' + theme + '">';
-    html += '<p class="palm-moment__eyebrow">✦ PALMPYAAR ✦</p>';
+    html += '<p class="palm-moment__eyebrow">✦ PalmPyaar ✦</p>';
     html += '<h3 class="palm-moment__heading">' + escapeHtml(HEADING) + '</h3>';
     for (var i = 0; i < sentences.length; i++) {
       html += '<p class="palm-moment__line">' + escapeHtml(sentences[i]) + '</p>';
@@ -376,12 +376,15 @@
     drawStar(ctx, 760, 270, 5);
     drawStar(ctx, 950, 300, 5);
 
-    // Eyebrow
+    // Eyebrow — the PalmPyaar wordmark, set like the site's hero title
+    // (Fraunces 500, -0.03em tracking) in the card's brand gold.
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#E8A33D';
-    ctx.font = '600 30px Manrope, "Noto Sans", system-ui, sans-serif';
-    ctx.fillText('P A L M P Y A A R', W / 2, 455);
+    ctx.font = '500 52px Fraunces, Georgia, serif';
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '-1.56px';
+    ctx.fillText('PalmPyaar', W / 2, 455);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
     // Heading
     ctx.font = '600 62px Fraunces, Georgia, serif';

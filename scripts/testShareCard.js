@@ -80,7 +80,10 @@ check('T2: card markup contains PalmPyaar branding', () => {
   const copy = moment.getMomentCopy(['When will I get the job?']);
   const html = moment.buildCardMarkup(copy);
   assert(html.includes('PalmPyaar'), 'markup must contain PalmPyaar');
-  assert(html.includes('PALMPYAAR'), 'markup must contain the PALMPYAAR wordmark');
+  const eyebrow = html.match(/<p class="palm-moment__eyebrow">(.*?)<\/p>/);
+  assert(eyebrow && eyebrow[1], 'eyebrow wordmark element must exist');
+  assert(eyebrow[1].includes('PalmPyaar'), 'eyebrow wordmark must read "PalmPyaar"');
+  assert(!eyebrow[1].includes('PALMPYAAR'), 'eyebrow wordmark must not be uppercase');
 });
 
 check('T2b: card markup contains the YOUR PALMPYAAR MOMENT heading', () => {
