@@ -20,7 +20,8 @@ const suites = [
   'scripts/testOpeningLibrary.js',
   'scripts/testQuestionFlow.js',
   'scripts/testAnswerQuality.js',
-  'scripts/testTimingEngine.js'
+  'scripts/testTimingEngine.js',
+  'scripts/testShareCard.js'
 ];
 
 let failed = 0;

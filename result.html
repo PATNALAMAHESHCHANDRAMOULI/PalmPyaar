@@ -112,11 +112,26 @@
                placeholder="Ask about your reading, relationships, or path..."
                required></textarea>
            </div>
-           <button type="submit" id="question-submit" class="btn-unlock" disabled aria-disabled="true">
-             Ask
-           </button>
-         </form>
-       </section>
+            <button type="submit" id="question-submit" class="btn-unlock" disabled aria-disabled="true">
+              Ask
+            </button>
+          </form>
+        </section>
+
+        <!-- PalmPyaar Moment — social sharing card (revealed once questions are used up) -->
+        <section id="palm-moment" class="reading-section reading-section--moment" hidden aria-labelledby="palm-moment-heading">
+          <h2 id="palm-moment-heading" class="reading-section__title">Your PalmPyaar Moment ✨</h2>
+          <p class="palm-moment__intro">When your reading is complete, take a moment with you. Download your PalmPyaar Moment and share it anywhere you like — the card is yours to post.</p>
+          <div class="palm-moment__card-wrap">
+            <canvas id="palm-moment-canvas" class="palm-moment__canvas" width="1080" height="1920" aria-label="Your PalmPyaar Moment sharing card"></canvas>
+          </div>
+          <div class="palm-moment__actions">
+            <button type="button" id="palm-moment-share" class="btn-unlock palm-moment__btn">Share Your PalmPyaar Moment</button>
+            <button type="button" id="palm-moment-download" class="btn-unlock btn-unlock--secondary palm-moment__btn">Download Card</button>
+          </div>
+          <p id="palm-moment-status" class="palm-moment__status" hidden></p>
+          <p class="palm-moment__note">PalmPyaar creates the image — you choose where to post it. Where your device supports it, the Share button opens your native share sheet.</p>
+        </section>
 
       <footer class="reading-footer">
         <p class="disclaimer">
@@ -132,5 +147,31 @@
 
   <script src="content/templates.js"></script>
   <script src="js/reveal.js"></script>
-  <script src="js/questions.js"></script></body>
+  <script src="js/questions.js"></script>
+  <script src="js/palmMoment.js"></script>
+  <script>
+    (function () {
+      function unlockMoment() {
+        var countEl = document.getElementById('question-count');
+        if (!countEl) return false;
+        if (countEl.textContent.indexOf('All questions used') !== -1) {
+          if (window.PalmMoment && typeof window.PalmMoment.reveal === 'function') {
+            window.PalmMoment.reveal();
+          }
+          return true;
+        }
+        return false;
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { unlockMoment(); });
+      } else {
+        unlockMoment();
+      }
+      var countEl = document.getElementById('question-count');
+      if (countEl && typeof MutationObserver !== 'undefined') {
+        new MutationObserver(function () { unlockMoment(); })
+          .observe(countEl, { childList: true, characterData: true, subtree: true });
+      }
+    })();
+  </script></body>
 </html>

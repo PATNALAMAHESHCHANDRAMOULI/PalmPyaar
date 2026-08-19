@@ -1422,3 +1422,58 @@ body.is-ready {
   margin-top: var(--space-sm);
   font-size: 0.875rem;
 }
+
+/* ─── PalmPyaar Moment — social sharing card ─── */
+.reading-section--moment {
+  padding-top: var(--space-md);
+}
+
+.palm-moment__intro {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: rgba(239, 234, 226, 0.7);
+  margin: 0 0 var(--space-md);
+}
+
+.palm-moment__card-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 var(--space-md);
+}
+
+.palm-moment__canvas {
+  display: block;
+  width: 100%;
+  max-width: 340px;
+  height: auto;
+  border-radius: var(--radius-md);
+  background: var(--night);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.palm-moment__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-sm);
+}
+
+.palm-moment__btn {
+  width: 100%;
+}
+
+.palm-moment__status {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: rgba(239, 234, 226, 0.6);
+  margin: 0 0 var(--space-sm);
+  text-align: center;
+}
+
+.palm-moment__note {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgba(239, 234, 226, 0.42);
+  margin: 0;
+  text-align: center;
+}
