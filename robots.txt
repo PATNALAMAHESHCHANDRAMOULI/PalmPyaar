@@ -1,0 +1,11 @@
+# robots.txt for PalmPyaar
+# Canonical site: https://www.palmpyaar.com/  (the apex domain redirects here)
+
+User-agent: *
+Allow: /
+
+# Serverless JSON endpoints are not pages and have no SEO value.
+# Disallowing them keeps crawlers away from token/payment handlers.
+Disallow: /api/
+
+Sitemap: https://www.palmpyaar.com/sitemap.xml
