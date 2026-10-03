@@ -11,15 +11,68 @@ const { reviewReading } = require('./reviewEngine');
 const { buildRewritePrompt } = require('./rewritePromptBuilder');
 const OpenAI = require('openai');
 
+// Current production model on the Groq OpenAI-compatible API.
+// openai/gpt-oss-120b is a Groq PRODUCTION model (not preview), served on the
+// free developer plan, with a 131,072 token context window and a 65,536 token
+// max-completion limit. It is a reasoning model, so every call must budget
+// extra max_completion_tokens for internal reasoning. The previously configured
+// model, llama-3.3-70b-versatile, is no longer served on this account's tier
+// and returns HTTP 404 model_not_found.
+const CURRENT_MODEL = 'openai/gpt-oss-120b';
+
 // Provider configuration. Optional env overrides (GROQ_MODEL, GROQ_BASE_URL)
 // default to the current working production configuration. Read at call time so
 // tests and runtime configuration changes take effect without re-requiring the
 // module. GROQ_API_KEY remains the only required secret for the AI path.
 function getProviderConfig() {
   return {
-    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+    model: process.env.GROQ_MODEL || CURRENT_MODEL,
     baseURL: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'
   };
+}
+
+/**
+ * Detects a model that the provider has retired or that this account can no
+ * longer reach. Groq answers an unavailable model with HTTP 404 and
+ * code "model_not_found" / "model_deprecated".
+ */
+function isRetiredModelError(err) {
+  if (!err) return false;
+  const status = err.status || err.statusCode;
+  const code = String(err.code || '');
+  const message = String(err.message || '').toLowerCase();
+  return status === 404
+    || code === 'model_not_found'
+    || code === 'model_deprecated'
+    || message.includes('does not exist or you do not have access to it')
+    || message.includes('decommissioned');
+}
+
+/**
+ * Single choke point for every provider chat-completion call.
+ * Groq retires models without warning, and GROQ_MODEL can still hold a stale
+ * identifier in the deployment environment. When the configured model is no
+ * longer available the call is retried once against CURRENT_MODEL so an expired
+ * model can never silently disable the AI path in production. Anything else
+ * (timeouts, rate limits, auth, network) is rethrown unchanged so the existing
+ * labeled fallbacks keep working exactly as before.
+ */
+async function createChatCompletion(client, request, options) {
+  const configuredModel = getProviderConfig().model;
+  try {
+    return await client.chat.completions.create(
+      Object.assign({}, request, { model: configuredModel }),
+      options
+    );
+  } catch (err) {
+    if (configuredModel === CURRENT_MODEL || !isRetiredModelError(err)) throw err;
+    console.warn('[groqProvider] Configured model "' + configuredModel +
+      '" is no longer available. Retrying once with "' + CURRENT_MODEL + '".');
+    return client.chat.completions.create(
+      Object.assign({}, request, { model: CURRENT_MODEL }),
+      options
+    );
+  }
 }
 
 /**
@@ -86,8 +139,7 @@ async function callAIReviewer(client, reading, reasoningPlan, tradition, userCon
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-    const completion = await client.chat.completions.create({
-      model: getProviderConfig().model,
+    const completion = await createChatCompletion(client, {
       messages: [{ role: 'user', content: reviewPrompt }],
       temperature: 0.3, // More analytical for review
       max_completion_tokens: 1500
@@ -218,8 +270,7 @@ async function callAIRewriter(client, draft, review, reasoningPlan, tradition, u
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-    const completion = await client.chat.completions.create({
-      model: getProviderConfig().model,
+    const completion = await createChatCompletion(client, {
       messages: [{ role: 'user', content: rewritePrompt }],
       temperature: 0.4, // Balanced for editing
       max_completion_tokens: 2200
@@ -305,8 +356,7 @@ async function generateReading(params) {
   const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
   try {
-    const completion = await client.chat.completions.create({
-      model: getProviderConfig().model,
+    const completion = await createChatCompletion(client, {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.85,
       max_completion_tokens: 2200
@@ -598,8 +648,7 @@ async function generateAnswer(params) {
     const startedAt = Date.now();
     const maxCompletionTokens = 1500;
 
-    const completion = await client.chat.completions.create({
-      model: getProviderConfig().model,
+    const completion = await createChatCompletion(client, {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.85,
       max_completion_tokens: maxCompletionTokens
@@ -640,5 +689,6 @@ module.exports.generateAnswer = generateAnswer;
 module.exports = {
   name: "groq",
   generateReading,
-  generateAnswer
+  generateAnswer,
+  CURRENT_MODEL
 };

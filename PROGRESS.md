@@ -549,3 +549,36 @@ Tests (all passing):
 To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 6."
 
 ---
+
+### Phase 7 — Expired Groq model replaced with a currently available free model — 2026-10-03
+Files created/modified:
+- `providers/groqProvider.js`
+- `scripts/verifyAiProviderPath.js`
+- `.env.example`
+- `PROGRESS.md`
+
+Key decisions made:
+- **Root cause:** `llama-3.3-70b-versatile` (the model this provider used until Phase 6) has been withdrawn from Groq. A live call against the project key returns `HTTP 404 / code: model_not_found` — "The model `llama-3.3-70b-versatile` does not exist or you do not have access to it." `GET /openai/v1/models` for this account no longer lists it (only `openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, audio and guard models remain). The provider and the `GROQ_API_KEY` are both still valid — only the model identifier is dead.
+- **Provider unchanged:** Groq stays. `https://api.groq.com/openai/v1` via the `openai` SDK, `GROQ_API_KEY` server-side, no new env var, no new dependency, stateless architecture untouched.
+- **New model:** `openai/gpt-oss-120b`, declared once as `CURRENT_MODEL` in `providers/groqProvider.js`. It is a Groq **Production** model (not preview), served on the free developer plan, with a 131,072-token context window and a 65,536-token max-completion limit. It is a reasoning model, so the existing 1500-token follow-up budget (set in the Phase 6 fix) is retained and re-verified as sufficient: `finish_reason` was always `stop`, never `length`.
+- **Expired-model recovery added:** every provider chat-completion call (writer, AI reviewer, AI rewriter, follow-up answer) now goes through one `createChatCompletion()` choke point. If the provider answers with a retired-model error (`404`, `model_not_found`, `model_deprecated`, "does not exist or you do not have access to it", "decommissioned") the call is retried **once** against `CURRENT_MODEL`. Because `getProviderConfig()` prefers `process.env.GROQ_MODEL` over the built-in default, a stale `GROQ_MODEL` in the deployment environment could otherwise silently override the corrected default and re-create this exact outage. Timeouts, rate limits, auth and network errors are rethrown unchanged, so all existing labeled fallbacks (`missing_api_key`, `pipeline_not_ready`, `provider_error`, `empty_or_malformed_response`) behave exactly as before.
+- `.env.example` now warns that `GROQ_MODEL` should be left unset and explains why a stale value overrides the default.
+
+Security decisions:
+- No payment, Razorpay, HMAC, state-token, question-token or qToken logic touched. No database, cache, or replay store added — the app remains stateless.
+- `CURRENT_MODEL` is exported for tests only; it is not secret. The API key remains server-side and is never logged (`T7`/`T7b` secret scan still passes).
+- Recovery adds no new outbound request on the happy path, and at most one extra request only when the configured model is already dead.
+
+Tests (all passing):
+- `scripts/verifyAiProviderPath.js` (16 checks, was 14) — added `T8c` (a retired `GROQ_MODEL` recovers on the current model and still returns `aiGenerated=true`) and `T8d` (a non-model error such as connection-refused is **not** retried and keeps the labeled fallback). `DEFAULT_MODEL` now asserts against the exported `CURRENT_MODEL` so the suite cannot drift from the code.
+- Full suite: 15/15 suites green, 0 failures.
+
+Real API verification (live Groq, production-mode token verification):
+- Follow-up questions "When will I get a job?", "When will I meet my soulmate?", "What does my name mean?" and "Why am I going through a difficult phase?" all returned HTTP 200, non-empty, correctly structured answers (353–1044 visible characters) using the DIRECT ANSWER / TIMING WINDOW / WHY THIS PERIOD STANDS OUT / WHY YOUR CHART SHOWS THIS / WHAT TO EXPECT / OUTLOOK labels, with the derived timing window (`answer-window`) present for both timing questions and the supplied name meaning reused verbatim. None returned the generic failure message. Re-run with `GROQ_MODEL` pinned to the retired `llama-3.3-70b-versatile`, all four still passed via the recovery path.
+
+Deviations from spec, if any:
+- None. No prompt, template, timing, name-meaning, share-card, payment or frontend behaviour was changed.
+
+To resume in a different tool: "Read PROJECT_SPEC.md and PROGRESS.md, then continue Phase 8."
+
+---

@@ -14,6 +14,8 @@
  *   T6   Malformed provider response is rejected safely (labeled fallback, no crash)
  *   T7   No API secret appears anywhere in client-side/static files
  *   T8   Production config never silently uses the template provider (fallback is labeled)
+ *   T8c  A retired GROQ_MODEL recovers on the current model instead of disabling AI
+ *   T8d  Non-model provider errors keep the existing labeled fallback (no retry)
  *   T9-T12  Existing regression suites still pass
  */
 
@@ -25,7 +27,10 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const DEFAULT_MODEL = 'openai/gpt-oss-120b';
+// The intended production model is declared once in the provider. Assert against
+// that constant instead of a literal so this suite can never drift from the code.
+const groqProvider = require('../providers/groqProvider');
+const DEFAULT_MODEL = groqProvider.CURRENT_MODEL;
 
 let passed = 0;
 let failed = 0;
@@ -64,6 +69,21 @@ function startMock(mode) {
         else if (allText.includes('EVALUATION CRITERIA')) type = 'reviewer';
 
         requests.push({ type, body });
+
+        // "retired-model" emulates a provider that has withdrawn a model: the
+        // retired id is answered with HTTP 404 model_not_found, exactly as Groq
+        // does now for llama-3.3-70b-versatile, while the current model answers.
+        if (mode === 'retired-model' && body && body.model && body.model !== DEFAULT_MODEL) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: {
+              message: 'The model `' + body.model + '` does not exist or you do not have access to it.',
+              type: 'invalid_request_error',
+              code: 'model_not_found'
+            }
+          }));
+          return;
+        }
 
         let content;
         if (type === 'reviewer') {
@@ -217,7 +237,7 @@ function runSuite(script) {
       assertTrue(mock.requests.some((r) => r.type === 'writer'), 'no writer request reached the mock (provider NOT selected)');
     });
 
-    await check('T2: intended model is passed to the provider (openai/gpt-oss-120b)', () => {
+    await check('T2: intended model is passed to the provider (' + DEFAULT_MODEL + ')', () => {
       const writer = mock.requests.find((r) => r.type === 'writer');
       assertTrue(!!writer, 'no writer request');
       assertTrue(writer.body.model === DEFAULT_MODEL, 'model was ' + writer.body.model);
@@ -309,6 +329,48 @@ function runSuite(script) {
     delete process.env.AI_READING;
     delete process.env.GROQ_API_KEY;
     delete process.env.GROQ_BASE_URL;
+    delete process.env.GROQ_MODEL;
+  }
+
+  // ---- T8c: retired/expired model must not disable the AI path ----
+  try {
+    mock = await startMock('retired-model');
+    process.env.AI_READING = 'true';
+    process.env.GROQ_API_KEY = 'gsk_test_mock';
+    process.env.GROQ_BASE_URL = mock.url;
+    process.env.GROQ_MODEL = 'llama-3.3-70b-versatile'; // retired by Groq
+
+    const res = await invokeHandler({ ...VALID_QUERY });
+
+    await check('T8c: a retired GROQ_MODEL recovers on the current model instead of failing', () => {
+      assertTrue(res._json && res._json.success === true, 'handler failed: ' + JSON.stringify(res._json));
+      assertTrue(res._json.aiGenerated === true,
+        'retired model was not recovered (labeled fallback instead): ' + JSON.stringify(res._json.reading && res._json.reading.reason));
+      assertTrue(res._json.reading.core && res._json.reading.love && res._json.reading.pro, 'missing reading sections');
+      assertTrue(mock.requests.some((r) => r.body.model === 'llama-3.3-70b-versatile'), 'test did not exercise the retired model first');
+      assertTrue(mock.requests.some((r) => r.body.model === DEFAULT_MODEL), 'no retry reached the current model');
+    });
+
+    delete process.env.GROQ_MODEL;
+  } finally {
+    if (mock) { try { await mock.close(); } catch (e) {} mock = null; }
+  }
+
+  // ---- T8d: non-model failures are still not retried into the AI path ----
+  try {
+    mock = await startMock('ok');
+    process.env.AI_READING = 'true';
+    process.env.GROQ_API_KEY = 'gsk_test_mock';
+    process.env.GROQ_BASE_URL = 'http://127.0.0.1:1'; // connection refused
+    process.env.GROQ_MODEL = DEFAULT_MODEL;
+
+    const res = await invokeHandler({ ...VALID_QUERY });
+    await check('T8d: non-model provider errors keep the existing labeled fallback', () => {
+      assertTrue(res._json.success === true, 'handler errored: ' + JSON.stringify(res._json));
+      assertTrue(res._json.aiGenerated === false, 'a network error was incorrectly reported as AI output');
+    });
+  } finally {
+    if (mock) { try { await mock.close(); } catch (e) {} mock = null; }
     delete process.env.GROQ_MODEL;
   }
 
