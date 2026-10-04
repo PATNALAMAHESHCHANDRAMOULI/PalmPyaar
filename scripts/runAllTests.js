@@ -20,6 +20,7 @@ const suites = [
   'scripts/testOpeningLibrary.js',
   'scripts/testQuestionFlow.js',
   'scripts/testAnswerQuality.js',
+  'scripts/testFollowupIntentQuality.js',
   'scripts/testTimingEngine.js',
   'scripts/testShareCard.js'
 ];

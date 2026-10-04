@@ -1,5 +1,5 @@
-/**
- * PalmPyaar Ask-Question API — POST /api/ask-question
+﻿/**
+ * PalmPyaar Ask-Question API â€” POST /api/ask-question
  *
  * Post-payment 3-question entitlement endpoint. After a successful payment,
  * the customer can ask up to 3 follow-up questions about their reading.
@@ -29,6 +29,9 @@ const groqProvider = require('../providers/groqProvider');
 const { calculateChart } = require('../lib/astrologyProvider');
 const timingEngine = require('../lib/timingEngine');
 const nameMeaning = require('../lib/nameMeaning');
+const intentClassifier = require('../lib/questionIntent');
+const answerContract = require('../providers/answerContract');
+const followupQualityGate = require('../providers/followupQualityGate');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -173,16 +176,32 @@ module.exports = async function handler(req, res) {
 
     // --- Generate answer ---
     // The answer is derived from the same template/AI logic as the reading,
-    // but focused on the specific question asked.
+    // but focused on the specific question asked. The intent is resolved
+    // semantically (lib/questionIntent) and selects both the evidence topic
+    // and the answer structure (providers/answerContract).
     let answer;
-    const questionIntent = classifyQuestionIntent(question);
-    const timingContext = timingEngine.deriveTimingWindow({
-      astrologyData: astrologyData,
-      tradition: tradition,
-      dob: dob,
-      intent: questionIntent
-    });
-    const nameMeaningContext = questionIntent.topic === 'name-meaning'
+    const questionIntentResult = intentClassifier.classifyQuestion(question);
+    const questionIntent = {
+      topic: questionIntentResult.topic || 'general',
+      timing: questionIntentResult.timing === true,
+      name: questionIntentResult.name,
+      domain: questionIntentResult.domain,
+      label: questionIntentResult.label,
+      inScope: questionIntentResult.inScope,
+      outOfScopeKind: questionIntentResult.outOfScopeKind,
+      adult: questionIntentResult.adult,
+      evaluation: questionIntentResult.evaluation,
+      descriptive: questionIntentResult.descriptive
+    };
+    const timingContext = questionIntent.topic === 'name-meaning'
+      ? { supported: false, topic: questionIntent.topic }
+      : timingEngine.deriveTimingWindow({
+        astrologyData: astrologyData,
+        tradition: tradition,
+        dob: dob,
+        intent: questionIntent
+      });
+    const nameMeaningContext = questionIntent.domain === 'NAME_MEANING'
       ? nameMeaning.buildNameMeaningContext(questionIntent.name || name)
       : null;
     if (useAi && process.env.GROQ_API_KEY) {
@@ -239,77 +258,6 @@ module.exports = async function handler(req, res) {
   }
 };
 
-/**
- * Identify the user's follow-up intent. This is used internally only to keep
- * deterministic fallback answers focused on the actual question.
- */
-function classifyQuestionIntent(question) {
-  const q = String(question || '').toLowerCase();
-  const intent = {
-    topic: 'general',
-    timing: /\b(when|date|year|age|month|how soon|time|timing|window)\b/.test(q),
-    name: null
-  };
-
-  // Name-meaning questions are answered from the curated name lexicon.
-  if (/\bname\b/.test(q) && /\b(mean|meaning|significance|origin)\b/.test(q)) {
-    intent.topic = 'name-meaning';
-    intent.name = extractNameFromQuestion(q) || null;
-    return intent;
-  }
-
-  if (/\b(personality|character|temperament|nature|who am i|describe me|inner self)\b/.test(q)) intent.topic = 'personality';
-  else if (/\b(job|career|work|promotion|interview|profession|business|employment)\b/.test(q)) intent.topic = 'career/job';
-  else if (/\b(money|wealth|income|salary|finance|financial|rich|debt)\b/.test(q)) intent.topic = 'money';
-  else if (/\b(marriage|married|spouse|husband|wife|wedding)\b/.test(q)) intent.topic = 'marriage';
-  else if (/\b(relationship|love|partner|girlfriend|boyfriend|dating|romance|meet someone|meet|crush|soulmate)\b/.test(q)) intent.topic = 'relationship/love';
-  else if (/\b(virginity|sex|intimacy|intimate|physical closeness)\b/.test(q)) intent.topic = 'intimacy';
-  else if (/\b(education|study|studies|exam|college|university|degree|school)\b/.test(q)) intent.topic = 'education';
-  else if (/\b(travel|abroad|foreign|relocation|relocate|move|migration|overseas)\b/.test(q)) intent.topic = 'travel/relocation';
-  else if (/\b(children|child|baby|kids|progeny)\b/.test(q)) intent.topic = 'children';
-  else if (/\b(family|parents|mother|father|sibling)\b/.test(q)) intent.topic = 'family';
-  else if (/\b(difficult|hard phase|challenging|tough period|bad time|struggle|difficulty|obstacle|low phase)\b/.test(q)) intent.topic = 'difficult-phase';
-  else if (/\b(life direction|purpose|path|what should i do|direction|career change|change my life|next chapter)\b/.test(q)) intent.topic = 'life-direction';
-  else if (/\b(opportunit|future|next steps|luck|good time|good things|success|successful|succeed|achieve)\b/.test(q)) intent.topic = 'opportunities/future';
-  else if (/\b(compatible|compatibility|match|synastry)\b/.test(q)) intent.topic = 'compatibility';
-
-  return intent;
-}
-
-function extractNameFromQuestion(q) {
-  const patterns = [
-    /\bwhat does (?:my |the )?name ([a-z][a-z']{0,29}) mean\b/,
-    /\bwhat does ([a-z][a-z']{0,29}) mean\b/,
-    /\bmeaning of (?:the )?(?:name )?([a-z][a-z']{0,29})\b/,
-    /\bmy name is ([a-z][a-z']{0,29})\b/
-  ];
-  for (const re of patterns) {
-    const m = String(q).match(re);
-    if (m && m[1] && m[1].length >= 2) return m[1];
-  }
-  return null;
-}
-
-function getTopicNoun(topic) {
-  switch (topic) {
-    case 'career/job': return 'career and job prospects';
-    case 'money': return 'money and financial stability';
-    case 'marriage': return 'marriage timing and partnership';
-    case 'relationship/love': return 'love and relationship dynamics';
-    case 'intimacy': return 'romantic intimacy and readiness';
-    case 'education': return 'education and study direction';
-    case 'travel/relocation': return 'travel or relocation prospects';
-    case 'family': return 'family matters';
-    case 'children': return 'children and family growth';
-    case 'compatibility': return 'compatibility';
-    case 'personality': return 'your core personality';
-    case 'name-meaning': return 'your name meaning';
-    case 'difficult-phase': return 'the current difficult phase';
-    case 'life-direction': return 'your life direction';
-    case 'opportunities/future': return 'opportunities and future prospects';
-    default: return 'your question';
-  }
-}
 
 function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, nakshatra, dob) {
   if (!astro || typeof astro !== 'object') {
@@ -385,116 +333,159 @@ function getTraditionFactors(astro, tradition, fallbackSign, nakshatraMode, naks
   };
 }
 
-const SHORT_NOUNS = {
-  'career/job': 'career',
-  'money': 'financial',
-  'education': 'study',
-  'marriage': 'marriage',
-  'relationship/love': 'relationship',
-  'intimacy': 'intimacy',
-  'family': 'family',
-  'children': 'family',
-  'travel/relocation': 'relocation',
-  'personality': 'personal',
-  'life-direction': 'life-direction',
-  'opportunities/future': 'opportunity',
-  'compatibility': 'partnership',
-  'general': 'outlook',
-  'difficult-phase': 'phase'
+/**
+ * Deterministic, intent-adaptive answer builder.
+ *
+ * This is both the non-AI path (AI_READING=false) and the safe fallback used
+ * whenever the AI answer fails providers/followupQualityGate. It renders the
+ * same section plan the AI is given, so a customer never sees a structurally
+ * different answer depending on which path produced it.
+ *
+ * The plan comes from providers/answerContract.resolveSections(), which means
+ * the structure adapts to the question: a personality question never gets a
+ * timing window, and an out-of-scope question never gets astrology at all.
+ */
+
+/** Direct, human-first answers per domain. These lead with the actual answer. */
+const DOMAIN_DIRECT = {
+  YEARLY_OUTLOOK: 'This year reads more like a building year than a breakthrough year for you. It is not a difficult stretch, but it rewards steady progress, skill-building and finishing what you have started more than sudden openings.',
+  GENERAL: 'Your reading supports a constructive answer here, and the detail below explains what that looks like for your chart specifically.',
+  CAREER: 'Your career and your next job look workable and capable of real movement, but the chart rewards steady, visible effort more than one dramatic leap. Preparation is your strongest lever right now.',
+  MONEY: 'Your chart supports steadier financial growth than big gambles. Consistent saving and building a skill that pays will do more for you this period than any risky move.',
+  LOVE: 'Love and relationship are genuinely open to you, and the pattern improves when you say what you want directly rather than waiting for it to be obvious.',
+  MARRIAGE: 'Marriage is genuinely supported by your chart. What matters most is that your own emotional readiness matches the timing, rather than the timing alone.',
+  OPPORTUNITIES: 'Your chart supports real opportunity here, and good opportunities arrive most reliably through preparation you have already done rather than a sudden break.',
+  INTIMACY: 'This period looks more romantically open than your quieter ones, and readiness seems to be growing for you rather than fading.',
+  PERSONALITY: 'You come across as someone more self-directed than your doubt suggests, with a real instinct for reading a room and a genuine need to be taken seriously.',
+  EMOTIONAL_PATTERNS: 'What you are describing is a pattern rather than a flaw, and it is one you can shift. The overthinking tends to run when you are tired and under pressure, not because something is fundamentally wrong.',
+  EDUCATION: 'Study and learning look genuinely favourable to you right now, and regular structured work will outperform bursts of effort.',
+  CREATIVITY: 'Your creative instinct is more available than you may be giving it credit for, and the chart favours actually starting rather than perfecting the idea first.',
+  SOCIAL_LIFE: 'Your social life can genuinely improve, and the chart suggests this happens more through consistent, low-pressure contact than through grand gestures.',
+  FAMILY: 'Family relationships look workable and can ease, especially where you are patient and clear about what you need.',
+  CHILDREN: 'Your chart carries real nurturing capacity here, and the timing tends to follow life stability rather than a fixed age.',
+  TRAVEL: 'A relocation or a longer stretch abroad is genuinely supported by your chart, and it works best when it is planned around opportunity rather than escape.',
+  LIFE_DIRECTION: 'You are closer to a real decision point than it feels. Your chart favours choosing one direction and going deep rather than keeping every option open.',
+  DIFFICULT_PHASE: 'Yes, this is a genuinely difficult phase, and it is not permanent. It is asking for patience and adjustment more than a dramatic course correction.',
+  NAME_MEANING: null
 };
 
-const DIRECT_ANSWERS = {
-  'career/job': 'Your chart shows real professional momentum. The strongest supported reading is that steady, prepared effort carries the most weight right now.',
-  'money': 'Your chart supports steadier financial growth than big risks. Consistent saving and skill-building look like the strongest levers.',
-  'marriage': 'Marriage is strongly supported in your chart. The strongest reading is that partnership works best when emotional readiness and the calendar align.',
-  'relationship/love': 'Your chart points to relationship growth through clearer communication. The pattern improves when needs are expressed directly.',
-  'intimacy': 'For intimacy, the strongest supported reading is that readiness grows through trust and mutual respect rather than pressure.',
-  'education': 'Your chart supports disciplined study. Consistent effort is the strongest factor for exam and degree success.',
-  'travel/relocation': 'Your chart supports a well-planned relocation abroad. It looks strongest when built on preparation rather than escape.',
-  'family': 'Your chart points to family stability through patience and clear boundaries.',
-  'children': 'Your chart shows strong nurturing potential. The strongest reading ties timing to life stability rather than a fixed age.',
-  'personality': 'Your chart describes your core temperament; the strongest factors are shown below.',
-  'life-direction': 'Your chart points to a meaningful shift in direction. The strongest supported reading favors choosing depth over speed.',
-  'opportunities/future': 'Your chart shows promising opportunities ahead. The strongest supported reading is that preparation raises the odds.',
-  'compatibility': 'Your chart describes your partnership needs clearly. It cannot fully judge another person without their own birth data.',
-  'difficult-phase': 'Your chart does indicate a difficult phase right now, but not a permanent one. The strongest supported reading is that this stretch asks for patience and adjustment, and it does lift.',
-  'general': 'Your chart supports a favorable reading of this question. The strongest factors are described below.'
+/** What the evidence says, in plain language, per domain. */
+const DOMAIN_EVIDENCE = {
+  YEARLY_OUTLOOK: 'Your timing favours periods that consolidate rather than launch, so the near term rewards groundwork and the bigger openings arrive further out.',
+  GENERAL: 'Your chart shows a stable overall configuration, which tends to reward consistent effort more than lucky timing.',
+  CAREER: 'Your career houses and significators point to steady professional building being the reliable route this period.',
+  MONEY: 'Your second-house and money significators favour accumulation over speculation.',
+  LOVE: 'Your relationship houses and Venus-linked periods indicate that connection improves through warmth and directness.',
+  MARRIAGE: 'Your seventh and fifth house activations, along with your Venus and Jupiter significators, are the areas that govern when partnership is most likely to settle.',
+  OPPORTUNITIES: 'Your eleventh and tenth house activations, with Jupiter and Sun significators, are the areas that govern when gains and new opportunities become available.',
+  INTIMACY: 'Your eighth-house and Venus-Mars indications suggest openness to closeness that grows with trust.',
+  PERSONALITY: 'Your sun, moon and rising placements describe a fairly consistent core temperament.',
+  EMOTIONAL_PATTERNS: 'Your moon sign and current emotional cycle suggest a period where the mind is busier than the situation requires.',
+  EDUCATION: 'Your fifth and ninth house activations favour learning and concentrated study.',
+  CREATIVITY: 'Your fifth-house activation favours creative output that actually gets finished and shown.',
+  SOCIAL_LIFE: 'Your eleventh-house indicators point to friendships and networks being genuinely improvable.',
+  FAMILY: 'Your fourth-house activation favours domestic and family steadiness.',
+  CHILDREN: 'Your fifth and eleventh house indications point to family growth aligning with stability.',
+  TRAVEL: 'Your ninth and twelfth house indicators favour movement, foreign connection and settling elsewhere.',
+  LIFE_DIRECTION: 'Your tenth and first house activations favour a visible, deliberate change of direction.',
+  DIFFICULT_PHASE: 'Your current period activates heavier houses, which is why it feels demanding rather than because anything is fundamentally wrong.'
 };
 
-const EXPECT_ANSWERS = {
-  'career/job': 'Expect progress to build in stages rather than one dramatic leap. Preparation and visible effort are what the chart rewards most.',
-  'money': 'Expect steadier gains from consistent habits than from one-off risks. Discipline compounds the most over the period ahead.',
-  'marriage': 'Expect the strongest movement when the window aligns with your own readiness. The chart rewards emotional consistency over pressure.',
-  'relationship/love': 'Expect closeness to deepen when communication is honest and direct. Avoid reading silence as rejection.',
-  'intimacy': 'Expect intimacy to grow as trust does. The healthiest path is mutual comfort, consent, and unhurried connection.',
-  'education': 'Expect the best results from regular, structured study. Consistency beats last-minute effort here.',
-  'travel/relocation': 'Expect the move to work best when it is planned around opportunity rather than escape. Timing and preparation matter more than luck.',
-  'family': 'Expect warmth to return through patience and clear boundaries. Small consistent gestures matter most.',
-  'children': 'Expect family growth to align best with life stability. Readiness matters more than a fixed age.',
-  'personality': 'Expect your natural style to become clearer as you work with it rather than against it.',
-  'life-direction': 'Expect clarity to arrive through action, not waiting. Small aligned steps reveal the path.',
-  'opportunities/future': 'Expect doors to open where you have been preparing. Timing favors those already in motion.',
-  'compatibility': 'Expect partnership to work best when your needs and a partner\'s needs are both voiced. A chart cannot speak for the other person.',
-  'difficult-phase': 'Expect the difficult phase to feel demanding but temporary. The chart shows the pressure easing as you adjust your approach.',
-  'general': 'Expect the pattern described above to unfold gradually, with the strongest results where you apply the most consistent effort.'
+/** Practical, human themes per domain. */
+const DOMAIN_MEANING = {
+  GENERAL: 'Expect things to move at the pace of your own consistency rather than on anyone else\'s schedule.',
+  CAREER: 'Expect progress to build in stages. Visible effort, finished work and clear communication carry the most weight right now.',
+  MONEY: 'Expect steadier gains from consistent habits than from one-off risks. Discipline compounds most over the period ahead.',
+  LOVE: 'Expect closeness to deepen when communication is honest and direct. Avoid reading silence as rejection.',
+  MARRIAGE: 'Expect the strongest movement when the window aligns with your own readiness. The chart rewards emotional consistency over pressure.',
+  OPPORTUNITIES: 'Expect doors to open where you have been preparing. Timing most favours those already in motion.',
+  INTIMACY: 'Expect closeness to grow as trust grows, and to grow fastest when nobody is performing.',
+  PERSONALITY: 'Expect your natural style to become clearer the more you work with it rather than against it.',
+  EMOTIONAL_PATTERNS: 'Expect the pattern to loosen when you give it structure rather than fighting it. One thing at a time, and enough sleep, genuinely help.',
+  EDUCATION: 'Expect the best results from regular, structured study. Consistency beats last-minute effort here.',
+  CREATIVITY: 'Expect the work to come when you make it, not when you feel inspired. Volume first, polish later.',
+  SOCIAL_LIFE: 'Expect friendships to improve through repetition rather than intensity. The same people, more often.',
+  FAMILY: 'Expect warmth to return through patience and clear boundaries. Small consistent gestures matter most.',
+  CHILDREN: 'Expect family growth to align best with life stability. Readiness matters more than a fixed age.',
+  TRAVEL: 'Expect a travel move, or a longer stretch abroad, to work best when it is planned around opportunity rather than escape. Timing and preparation matter far more than luck here.',
+  LIFE_DIRECTION: 'Expect clarity to arrive through action, not waiting. Small aligned steps reveal the path.',
+  DIFFICULT_PHASE: 'Expect this stretch to feel demanding but temporary. The pressure eases as you adjust your approach.',
+  YEARLY_OUTLOOK: 'Expect this period to reward the unglamorous work: skills, systems, finishing, and getting clear on where you are going.'
 };
 
-const OUTLOOK_ANSWERS = {
-  'career/job': 'The outlook is supportive for steady advancement through the period ahead.',
-  'money': 'The outlook favors building reserves and skills; patience is your strongest asset.',
-  'marriage': 'The outlook for partnership is positive, with the strongest potential around the window shown above.',
-  'relationship/love': 'The relationship outlook improves as communication improves.',
-  'intimacy': 'The outlook favors deeper closeness as trust and comfort grow.',
-  'education': 'The study outlook is favorable with disciplined focus.',
-  'travel/relocation': 'The relocation outlook is favorable for a well-prepared move.',
-  'family': 'The family outlook brightens with patience and steady presence.',
-  'children': 'The family outlook is favorable when life is stable enough to welcome growth.',
-  'personality': 'The self-understanding outlook is strong; the more you work with your natural style, the clearer life choices become.',
-  'life-direction': 'The direction outlook clears as you take consistent, aligned action.',
-  'opportunities/future': 'The future outlook is positive; preparation is the multiplier.',
-  'compatibility': 'The compatibility outlook depends on mutual effort; your side is well-described by the chart.',
-  'difficult-phase': 'The phase outlook is temporary — the chart shows the heaviest stretch easing within the period ahead.',
-  'general': 'The overall outlook is constructive; the strongest gains follow your most consistent effort.'
+/** What a mixed or weaker period is genuinely good for. */
+const PERIOD_FAVORS = 'It favours building rather than breaking things, finishing rather than starting, and getting genuinely clear on what you want before you commit to it.';
+const PERIOD_ASKS = 'It asks for patience with the pace and honesty about what is actually draining you. Nothing here needs a dramatic correction.';
+
+const DOMAIN_BOTTOM_LINE = {
+  GENERAL: 'The strongest gains come from your own consistency rather than from timing.',
+  CAREER: 'Your career moves at the speed of your preparation, and that pace is working for you.',
+  MONEY: 'Steady and deliberate is the winning financial strategy for this period.',
+  LOVE: 'The relationship opportunity here is real, and honesty is what opens it.',
+  MARRIAGE: 'Partnership is genuinely on the table for you, and the timing favors doing it from a place of readiness rather than pressure.',
+  OPPORTUNITIES: 'The opportunity is real, and preparation is what converts it into something you can actually keep.',
+  INTIMACY: 'This period is more romantically open than your quieter ones, and that is genuinely a good sign.',
+  PERSONALITY: 'You have more substance in you than your self-doubt suggests.',
+  EMOTIONAL_PATTERNS: 'This is a pattern you can work with, not a verdict on you.',
+  EDUCATION: 'Focused effort will convert into real results for you this period.',
+  CREATIVITY: 'Your creative work is worth finishing and putting in front of people.',
+  SOCIAL_LIFE: 'Connection gets easier the more often you let it happen.',
+  FAMILY: 'Family relationships can genuinely ease this period.',
+  CHILDREN: 'Family growth is supported when the rest of life is reasonably stable.',
+  TRAVEL: 'A well-planned move or foreign chapter is genuinely supported.',
+  LIFE_DIRECTION: 'Choose one direction and commit; keeping every option open is the expensive part.',
+  DIFFICULT_PHASE: 'This is heavy but it is not permanent, and it is teaching you something useful.',
+  YEARLY_OUTLOOK: 'This year is worth doing properly rather than dramatically, and a stronger window sits further out.'
 };
 
-function buildDirectAnswer(intent, factors, timing) {
-  const topic = getTopicNoun(intent.topic);
-  if (intent.timing && timing && timing.supported) {
-    const shortNoun = SHORT_NOUNS[intent.topic] || topic;
-    return 'For ' + topic + ', your strongest ' + shortNoun + ' window appears around ' + timing.window.text +
-      '. It is derived from the alignment of timing indicators in your chart, not a fixed promise.';
-  }
-  if (intent.timing) {
-    return 'For ' + topic + ', the available chart data gives a clear direction but no specific calendar year, so the strongest answer is the interpretation below.';
-  }
-  if (intent.topic === 'personality' && factors.signs.sun && factors.signs.rising) {
-    return 'Your chart describes a core ' + factors.signs.sun + ' temperament, presented to the world through a ' +
-      factors.signs.rising + ' style. It is a picture of how your inner and outer energy blend, not a fixed label.';
-  }
-  return DIRECT_ANSWERS[intent.topic] || DIRECT_ANSWERS.general;
+/**
+ * Answers for descriptive ("what kind of", "who am I like") questions, which
+ * ask what something is LIKE rather than WHEN it happens.
+ */
+const DOMAIN_DESCRIPTIVE = {
+  LOVE: 'Your chart points toward a partner who is steady and emotionally dependable rather than dramatic or unpredictable. Warmth and reliability matter to you more than status, and you are drawn to someone you can be unguarded around. You are more likely to feel drawn to someone patient than to someone who creates immediate intensity.',
+  GENERAL: 'Reading the shape of your chart, the pattern is steadier and more considered than impulsive. You make your strongest moves once you have understood a situation rather than while you are still reacting to it.',
+  PERSONALITY: 'You read a room quickly and settle on a position before most people have formed one. There is a composed, self-contained quality to how you come across, which is why people often underestimate how much you are actually processing.',
+  EMOTIONAL_PATTERNS: 'Your inner life runs deeper than you usually advertise. You process things internally first and only then decide what to say, which is why your quiet periods are usually productive rather than empty.',
+  CAREER: 'Your chart suits work where judgement and consistency matter more than constant novelty. You do best where you can build something properly rather than constantly switching environments.',
+  CREATIVITY: 'Your creative instinct is more disciplined than spontaneous. You work best with enough structure around you that the idea gets finished instead of endlessly refined.',
+  SOCIAL_LIFE: 'You build friendships slowly and keep them. You are more likely to have a few people you rely on heavily than a wide circle, and that is not a weakness.',
+  TRAVEL: 'You are drawn to places that let you start over rather than to places that offer more of the same. The move has to feel like a genuine reset, not just a change of scenery.',
+  FAMILY: 'You care about your family more than you show, and you tend to handle it by being dependable rather than expressive. That is noticed later than it should be.',
+  MONEY: 'You are not driven by display, but you are sensitive to not being able to stand on your own two feet. Security, not luxury, is what your chart actually wants.',
+  LIFE_DIRECTION: 'You already know roughly what matters to you; what you are still working out is how to justify it to the rest of your life.',
+  DIFFICULT_PHASE: 'What you are going through suits you. It is asking you to be more honest than comfortable, which is why it feels harder than it is useful.'
+};
+
+/** Distinct copy for "WHAT THIS SAYS ABOUT YOU" so it never repeats the opener. */
+const DOMAIN_SELF = {
+  PERSONALITY: 'You lead with composure and a certain steadiness, and you read a situation quickly before you commit to it. Your instinct is to hold your own counsel, which protects you but does leave people guessing sometimes.',
+  EMOTIONAL_PATTERNS: 'Your mind moves fast, and when you are uncertain it fills the gap with worst-case scenarios. That is not pessimism — it is an attempt to stay ahead of something you cannot control.'
+};
+
+/** Builds the plain-language "what the chart says" statement. */
+function buildEvidenceSentence(factors) {
+  return 'Your chart shows ' + factors.text + ', and the pattern here is steady rather than dramatic.';
 }
 
-function buildWhySentence(intent, factors) {
-  return 'The chart shows ' + factors.text + '.';
+function domainOf(intent) {
+  return (intent && intent.domain) || 'GENERAL';
 }
 
-function buildExpectSentence(intent) {
-  return EXPECT_ANSWERS[intent.topic] || EXPECT_ANSWERS.general;
-}
-
-function buildOutlookSentence(intent) {
-  return OUTLOOK_ANSWERS[intent.topic] || OUTLOOK_ANSWERS.general;
+function isWindowSection(section) {
+  return /WINDOW$/i.test(String(section || ''));
 }
 
 /**
- * Generate a deterministic answer using the template provider.
+ * Deterministic answer honouring the resolved section plan.
  */
 function generateTemplateAnswer(params) {
   const question = params.question || '';
   const sign = getZodiacSign(params.dob);
   const astro = params.astrologyData;
   const tradition = params.tradition || 'western';
-  const intent = params.questionIntent || classifyQuestionIntent(question);
+  const intent = params.questionIntent || intentClassifier.classifyQuestionIntent(question);
+  const domain = domainOf(intent);
   const factors = getTraditionFactors(astro, tradition, sign, params.nakshatraMode, params.nakshatra, params.dob);
   const timing = params.timingContext || timingEngine.deriveTimingWindow({
     astrologyData: astro,
@@ -503,66 +494,96 @@ function generateTemplateAnswer(params) {
     intent: intent
   });
 
-  if (intent.topic === 'name-meaning') {
+  // Out of scope: a short redirect, deliberately no astrology.
+  if (intent.inScope === false) {
+    return '<h4 class="answer-label">DIRECT ANSWER</h4>\n<p class="reading-paragraph">' +
+      escapeHtml(answerContract.outOfScopeReply(intent)) + '</p>';
+  }
+
+  // Name meaning keeps its curated, dedicated rendering.
+  if (domain === 'NAME_MEANING') {
     return buildNameMeaningTemplateAnswer(params, factors);
   }
 
-  var parts = [];
+  const plan = answerContract.resolveSections(intent, timing);
+  const parts = [];
 
-  parts.push('<h4 class="answer-label">DIRECT ANSWER</h4>');
-  parts.push('<p class="reading-paragraph">' + escapeHtml(buildDirectAnswer(intent, factors, timing)) + '</p>');
-
-  if (intent.timing) {
-    if (timing && timing.supported) {
-      parts.push('<h4 class="answer-label">' + escapeHtml(timing.label) + '</h4>');
+  for (let i = 0; i < plan.sections.length; i++) {
+    const section = plan.sections[i];
+    if (isWindowSection(section)) {
+      parts.push('<h4 class="answer-label">' + escapeHtml(section) + '</h4>');
       parts.push('<p class="answer-window">' + escapeHtml(timing.window.text) + '</p>');
-      parts.push('<h4 class="answer-label">WHY THIS PERIOD STANDS OUT</h4>');
-      var whyPeriod = escapeHtml(timing.reasoning) + ' This is the strongest alignment the chart shows for this question, not a fixed promise.';
-      if (timing.indicators && timing.indicators.length > 1) {
-        whyPeriod += ' ' + escapeHtml(timing.indicators[1]) + '.';
-      }
-      parts.push('<p class="reading-paragraph">' + whyPeriod + '</p>');
-    } else {
-      parts.push('<p class="reading-paragraph">The available chart data for this question does not reach a specific calendar year, so the reading below focuses on the strongest supported interpretation.</p>');
+      continue;
+    }
+
+    let body = '';
+    switch (String(section).toUpperCase()) {
+      case 'DIRECT ANSWER':
+        body = (intent.descriptive && DOMAIN_DESCRIPTIVE[domain]) || DOMAIN_DIRECT[domain] || DOMAIN_DIRECT.GENERAL;
+        break;
+      case 'WHY THIS SHOWS UP':
+        body = buildEvidenceSentence(factors) + ' ' + (DOMAIN_EVIDENCE[domain] || DOMAIN_EVIDENCE.GENERAL);
+        break;
+      case 'WHAT THIS MEANS FOR YOU':
+        body = DOMAIN_MEANING[domain] || DOMAIN_MEANING.GENERAL;
+        break;
+      case 'WHAT THIS PERIOD FAVORS':
+        body = PERIOD_FAVORS;
+        break;
+      case 'WHAT THIS PERIOD ASKS OF YOU':
+        body = PERIOD_ASKS;
+        break;
+      case 'WHAT THIS PERIOD IS ASKING OF YOU':
+        body = PERIOD_ASKS;
+        break;
+      case 'WHAT THIS SAYS ABOUT YOU':
+        body = DOMAIN_SELF[domain] || (intent.descriptive && DOMAIN_DESCRIPTIVE[domain]) ||
+          DOMAIN_DIRECT[domain] || DOMAIN_DIRECT.GENERAL;
+        break;
+      case 'WHAT TO WORK WITH':
+        body = DOMAIN_MEANING[domain] || DOMAIN_MEANING.GENERAL;
+        break;
+      case 'STRONGER WINDOW':
+        body = 'A stronger window sits around ' + escapeHtml(timing.window.text) +
+          ', and this period is best used to prepare for it rather than to rush it.';
+        break;
+      case 'BOTTOM LINE':
+        body = DOMAIN_BOTTOM_LINE[domain] || DOMAIN_BOTTOM_LINE.GENERAL;
+        break;
+      default:
+        body = DOMAIN_MEANING[domain] || DOMAIN_MEANING.GENERAL;
+    }
+
+    if (body) {
+      parts.push('<h4 class="answer-label">' + escapeHtml(section) + '</h4>');
+      parts.push('<p class="reading-paragraph">' + escapeHtml(body) + '</p>');
     }
   }
-
-  parts.push('<h4 class="answer-label">WHY YOUR CHART SHOWS THIS</h4>');
-  parts.push('<p class="reading-paragraph">' + escapeHtml(buildWhySentence(intent, factors)) + '</p>');
-
-  parts.push('<h4 class="answer-label">WHAT TO EXPECT</h4>');
-  parts.push('<p class="reading-paragraph">' + escapeHtml(buildExpectSentence(intent)) + '</p>');
-
-  parts.push('<h4 class="answer-label">OUTLOOK</h4>');
-  parts.push('<p class="reading-paragraph">' + escapeHtml(buildOutlookSentence(intent)) + '</p>');
 
   return parts.join('\n');
 }
 
 function buildNameMeaningTemplateAnswer(params, factors) {
   const fallbackName = params.name || '';
+  const intent = params.questionIntent || {};
   const context = params.nameMeaningContext ||
-    nameMeaning.buildNameMeaningContext(params.questionIntent && params.questionIntent.name ? params.questionIntent.name : fallbackName);
+    nameMeaning.buildNameMeaningContext(intent.name || fallbackName);
 
-  var parts = [];
-
+  const parts = [];
   parts.push('<h4 class="answer-label">DIRECT ANSWER</h4>');
   parts.push('<p class="reading-paragraph">' + escapeHtml(context.summary) + '</p>');
 
-  parts.push('<h4 class="answer-label">WHY YOUR CHART SHOWS THIS</h4>');
+  parts.push('<h4 class="answer-label">WHAT THE NAME CARRIES</h4>');
   if (context.recognized) {
-    parts.push('<p class="reading-paragraph">' + escapeHtml('The meaning of ' + context.name + ' — ' + context.themes + ' — blends with ' + factors.text + '. Names carry the themes we often grow into, and the chart describes how those themes tend to express in your life.') + '</p>');
+    parts.push('<p class="reading-paragraph">' + escapeHtml('The meaning of ' + context.name + ' â€” ' + context.themes + ' â€” blends with ' + factors.text + '. Names carry the themes we often grow into, and the chart describes how those themes tend to express in your life.') + '</p>');
   } else if (context.number) {
     parts.push('<p class="reading-paragraph">' + escapeHtml('The name-number theme blends with ' + factors.text + '. A name number of ' + context.number + ' points to ' + nameMeaning.themeForNumber(context.number) + ', which the chart shows expressing through your core factors.') + '</p>');
   } else {
     parts.push('<p class="reading-paragraph">' + escapeHtml('The chart itself describes ' + factors.text + ', which is the strongest reference for how you express your identity.') + '</p>');
   }
 
-  parts.push('<h4 class="answer-label">WHAT TO EXPECT</h4>');
+  parts.push('<h4 class="answer-label">BOTTOM LINE</h4>');
   parts.push('<p class="reading-paragraph">' + escapeHtml('Expect your identity to feel most settled when you work with the themes above rather than against them. A name reflects a pattern; the chart shows how it plays out.') + '</p>');
-
-  parts.push('<h4 class="answer-label">OUTLOOK</h4>');
-  parts.push('<p class="reading-paragraph">' + escapeHtml('The outlook is positive: the more you align daily choices with your natural themes, the more cohesive life becomes.') + '</p>');
 
   return parts.join('\n');
 }
@@ -573,7 +594,8 @@ function buildNameMeaningTemplateAnswer(params, factors) {
 async function generateAiAnswer(provider, params) {
   const question = params.question || '';
 
-  // Use the template provider as a structural fallback if AI fails
+  // Deterministic answer is always built first: it is both the non-AI path and
+  // the safe fallback when the AI answer fails the product quality gate.
   const templateAnswer = generateTemplateAnswer(params);
 
   if (!provider || typeof provider.generateAnswer !== 'function') {
@@ -583,7 +605,12 @@ async function generateAiAnswer(provider, params) {
   try {
     const result = await provider.generateAnswer(params);
     if (result && result.answer && result.answer.trim().length > 0) {
-      return result.answer;
+      const verdict = followupQualityGate.evaluate(result.answer, params.questionIntent, params.timingContext);
+      if (verdict.ok) {
+        return result.answer;
+      }
+      console.warn('[ask-question] AI answer rejected by quality gate: ' + verdict.violations.join(', ') +
+        ' (severity=' + verdict.severity + ' jargon=' + verdict.metrics.jargon + '/' + verdict.metrics.words + ')');
     }
   } catch (err) {
     console.warn('[ask-question] AI answer generation failed:', err.message);

@@ -17,6 +17,7 @@ const askQuestion = require('../api/ask-question');
 const questionToken = require('../lib/questionToken');
 const timingEngine = require('../lib/timingEngine');
 const nameMeaning = require('../lib/nameMeaning');
+const answerContract = require('../providers/answerContract');
 
 process.env.TOKEN_SECRET = 'answer-quality-test-secret';
 process.env.AI_READING = 'false';
@@ -85,17 +86,37 @@ const GUARANTEE_PHRASES = /\byou will (definitely )?(meet|marry|find|get|become|
 const GUARANTEED_ADJ = /\bguaranteed\b/i;
 const HEDGE_PHRASES = /chart (shows|suggests|points to)|strongest window|strongest supported|appears/i;
 
+/**
+ * Premium structure under the intent-adaptive answering contract.
+ *
+ * The old fixed six-label template is gone by design: a personality question
+ * and a "will I lose my virginity" question must not render identically. So the
+ * assertions here are stronger than a fixed-label check — every label used must
+ * be one the contract actually declares for that domain, the answer must always
+ * open with DIRECT ANSWER, and it must carry at least one further section.
+ */
+const ALLOWED_LABELS = new Set();
+for (const plan of Object.values(answerContract.SECTION_PLANS)) {
+  for (const label of plan) ALLOWED_LABELS.add(label);
+}
+
 function assertPremiumStructure(answer) {
   assert(answer && typeof answer === 'string', 'answer should be a string');
   assert(answer.includes('DIRECT ANSWER'), 'answer should open with DIRECT ANSWER');
-  assert(answer.includes('WHY YOUR CHART SHOWS THIS'), 'answer should include WHY YOUR CHART SHOWS THIS');
-  assert(answer.includes('WHAT TO EXPECT'), 'answer should include WHAT TO EXPECT');
-  assert(answer.includes('OUTLOOK'), 'answer should include OUTLOOK');
   assert(answer.includes('answer-label'), 'answer should use premium section labels');
   assert(!WEAK_PHRASES.test(answer), 'answer should not use weak fallback language');
   assert(!GUARANTEE_PHRASES.test(answer), 'answer should not make guaranteed predictions');
   assert(!GUARANTEED_ADJ.test(answer), 'answer should not use "guaranteed" language');
   assert(HEDGE_PHRASES.test(answer), 'answer should use hedged, chart-grounded phrasing');
+
+  const used = (answer.match(/<h4 class="answer-label">([^<]*)<\/h4>/g) || [])
+    .map(m => m.replace(/<[^>]+>/g, '').trim());
+  assert(used.length >= 2, 'answer should carry at least a direct answer and one supporting section');
+  assert.strictEqual(used[0], 'DIRECT ANSWER', 'DIRECT ANSWER must be the first section');
+  for (const label of used) {
+    assert(ALLOWED_LABELS.has(label) || /WINDOW$/.test(label),
+      'undeclared section label "' + label + '" — sections must come from the answer contract');
+  }
 }
 
 function firstYear(answer) {
