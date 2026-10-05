@@ -22,7 +22,7 @@ const questionToken = require('../lib/questionToken');
  *      token MUST equal the razorpayOrderId being verified — a token cannot be
  *      substituted onto a different order.
  *   3. Amount/currency: the state token must record exactly the expected amount
- *      (₹20 = 2000 paise, INR). The order was created at that amount server-side
+ *      (₹9 = 900 paise, INR). The order was created at that amount server-side
  *      and the Razorpay signature binds the payment to that order, so a payment
  *      for any other amount/order can never unlock a reading.
  *   4. Reading data is taken ONLY from the verified state token. Any reading
@@ -153,7 +153,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // --- 3. Amount/currency enforcement (₹20 = 2000 paise, INR) ---
+    // --- 3. Amount/currency enforcement (₹9 = 900 paise, INR) ---
     const expectedAmount = expectedAmountRupees();
     if (expectedAmount === null) {
       return res.status(500).json({

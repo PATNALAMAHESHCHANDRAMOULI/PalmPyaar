@@ -1,5 +1,5 @@
-/**
- * verifyProductionChecks.js — production-oriented checks for the Razorpay flow.
+﻿/**
+ * verifyProductionChecks.js â€” production-oriented checks for the Razorpay flow.
  *
  * NOTE: filename kept from the original direct-UPI flow; this file now verifies
  * the Razorpay gateway. Asserts:
@@ -211,14 +211,14 @@ function rzSignature(orderId, paymentId) {
     await check('create-payment: success -> 200 with real order, never leaks secret', async () => {
         const restore = installFetchMock({ id: RZ_ORDER });
         try {
-            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '20' }, async () => {
+            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '9' }, async () => {
                 const res = makeRes();
                 await createPayment(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
                 assertEqual(res.statusCode, 200, 'status');
                 const p = res._json.payment;
                 assertEqual(p.razorpayOrderId, RZ_ORDER, 'order id');
                 assertEqual(p.keyId, KEY_ID, 'public keyId returned');
-                assertEqual(p.amountPaise, 2000, 'amountPaise');
+                assertEqual(p.amountPaise, 900, 'amountPaise');
                 const serialized = JSON.stringify(res._json);
                 assertTrue(!serialized.includes(KEY_SECRET), 'KEY_SECRET must never appear in response');
                 assertTrue(!serialized.includes('keySecret'), 'keySecret field must not exist');

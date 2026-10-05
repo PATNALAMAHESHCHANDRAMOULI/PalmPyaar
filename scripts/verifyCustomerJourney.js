@@ -1,5 +1,5 @@
-/**
- * verifyCustomerJourney.js — end-to-end customer journey verification for the
+﻿/**
+ * verifyCustomerJourney.js â€” end-to-end customer journey verification for the
  * Razorpay checkout flow, walking the REAL serverless handlers end-to-end.
  *
  * NOTE: filename kept from the original direct-UPI flow; this file now walks:
@@ -103,7 +103,7 @@ async function createPaidOrder() {
     const restore = installFetchMock({ id: RZ_ORDER });
     try {
         let payment = null;
-        await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '20' }, async () => {
+        await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '9' }, async () => {
             const res = makeRes();
             await require('../api/create-payment')(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
             if (res.statusCode !== 200) throw new Error('create-payment failed: ' + JSON.stringify(res._json));
@@ -148,7 +148,7 @@ async function verifyAndGetResultUrl(payment, overrides) {
     const generateReading = require('../api/generate-reading');
 
     // ============================================================
-    // STEP 1 — Landing page contract (static)
+    // STEP 1 â€” Landing page contract (static)
     // ============================================================
 
     await check('STEP 1: landing page collects details + requires the hand photo', () => {
@@ -186,19 +186,19 @@ async function verifyAndGetResultUrl(payment, overrides) {
     });
 
     // ============================================================
-    // STEP 2 — create-payment
+    // STEP 2 â€” create-payment
     // ============================================================
 
     await check('STEP 2: create-payment returns a Razorpay order', async () => {
         const restore = installFetchMock({ id: RZ_ORDER });
         try {
-            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '20' }, async () => {
+            await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, PAYMENT_AMOUNT: '9' }, async () => {
                 const res = makeRes();
                 await createPayment(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
                 assertEqual(res.statusCode, 200, 'status');
                 assertEqual(res._json.payment.razorpayOrderId, RZ_ORDER, 'razorpay order id');
                 assertEqual(res._json.payment.keyId, KEY_ID, 'keyId for Checkout');
-                assertEqual(res._json.payment.amountPaise, 2000, 'amountPaise');
+                assertEqual(res._json.payment.amountPaise, 900, 'amountPaise');
             });
         } finally {
             restore();
@@ -214,7 +214,7 @@ async function verifyAndGetResultUrl(payment, overrides) {
     });
 
     // ============================================================
-    // STEP 3 — Razorpay Checkout success -> verify-razorpay
+    // STEP 3 â€” Razorpay Checkout success -> verify-razorpay
     // ============================================================
 
     await check('STEP 3: verify-razorpay verifies signature and mints token', async () => {
@@ -244,7 +244,7 @@ async function verifyAndGetResultUrl(payment, overrides) {
     });
 
     // ============================================================
-    // STEP 4 — result.html loads the reading
+    // STEP 4 â€” result.html loads the reading
     // ============================================================
 
     await check('STEP 4: result.html renders the reading after verified payment', async () => {
@@ -277,7 +277,7 @@ async function verifyAndGetResultUrl(payment, overrides) {
     });
 
     // ============================================================
-    // STEP 5 — tamper resistance
+    // STEP 5 â€” tamper resistance
     // ============================================================
 
     await check('STEP 5: forged token never unlocks the reading', async () => {
@@ -305,7 +305,7 @@ async function verifyAndGetResultUrl(payment, overrides) {
     });
 
     // ============================================================
-    // STEP 6 — revisit / repeat visit (stateless)
+    // STEP 6 â€” revisit / repeat visit (stateless)
     // ============================================================
 
     await check('STEP 6: repeat visit regenerates the same reading (deterministic)', async () => {

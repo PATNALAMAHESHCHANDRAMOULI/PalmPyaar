@@ -12,7 +12,7 @@
  *   5  Same paid order + modified tradition          -> REJECTED
  *   6  Same paid order + modified photoHash          -> REJECTED
  *   7  Same paid payment + modified orderId          -> REJECTED
- *   8  Amount other than ₹20 / 2000 paise            -> REJECTED
+ *   8  Amount other than ₹9 / 900 paise             -> REJECTED
  *   9  Expired state token                           -> REJECTED
  *   10 Tampered state token                          -> REJECTED
  *   11 Invalid Razorpay payment signature            -> REJECTED
@@ -249,25 +249,25 @@ function rzSignature(orderId, paymentId) {
     });
 
     // ============================================================
-    // CASE 8 — amount other than ₹20 / 2000 paise -> REJECTED
+    // CASE 8 — amount other than ₹9 / 900 paise -> REJECTED
     // ============================================================
-    await check('CASE 8: order created at ₹20 / 2000 paise verifies at default ₹20 -> SUCCESS', async () => {
-        const payment = await obtainPayment(); // state token records amount=20, amountPaise=2000
-        const res = await callVerify(verifyBody(payment, sigFor(payment))); // verify with default ₹20
+    await check('CASE 8: order created at ₹9 / 900 paise verifies at default ₹9 -> SUCCESS', async () => {
+        const payment = await obtainPayment(); // state token records amount=9, amountPaise=900
+        const res = await callVerify(verifyBody(payment, sigFor(payment))); // verify with default ₹9
         assertEqual(res.statusCode, 200, 'status');
         assertTrue(res._json.verified === true, 'verified');
     });
 
-    await check('CASE 8: order created at ₹49 / 4900 paise cannot verify at default ₹20 (amount mismatch) -> REJECTED', async () => {
+    await check('CASE 8: order created at ₹49 / 4900 paise cannot verify at default ₹9 (amount mismatch) -> REJECTED', async () => {
         const payment = await obtainPayment({ PAYMENT_AMOUNT: '49' }); // state token records amount=49
-        const res = await callVerify(verifyBody(payment, sigFor(payment))); // verify with default ₹20
+        const res = await callVerify(verifyBody(payment, sigFor(payment))); // verify with default ₹9
         assertEqual(res.statusCode, 403, 'status');
         assertNoGrant(res, 'amount mismatch');
     });
 
-    await check('CASE 8: order created at ₹50 cannot verify at default ₹20 (amount mismatch) -> REJECTED', async () => {
-        const payment = await obtainPayment({ PAYMENT_AMOUNT: '50' }); // state token records amount=50
-        const res = await callVerify(verifyBody(payment, sigFor(payment))); // verify with default ₹20
+    await check('CASE 8: order created at ₹20 cannot verify at default ₹9 (amount mismatch) -> REJECTED', async () => {
+        const payment = await obtainPayment({ PAYMENT_AMOUNT: '20' }); // state token records amount=20
+        const res = await callVerify(verifyBody(payment, sigFor(payment))); // verify with default ₹9
         assertEqual(res.statusCode, 403, 'status');
         assertNoGrant(res, 'amount mismatch');
     });
@@ -296,7 +296,7 @@ function rzSignature(orderId, paymentId) {
             v: 1, razorpayOrderId: payment.razorpayOrderId,
             name: CUSTOMER.name, dob: CUSTOMER.dob, birthplace: CUSTOMER.birthplace,
             tradition: CUSTOMER.tradition, photoHash: PHOTO, orderId: payment.orderId,
-            amount: 20, amountPaise: 2000, currency: 'INR',
+            amount: 9, amountPaise: 900, currency: 'INR',
             iat: now - 200, exp: now - 100 // already expired
         });
         const res = await callVerify(verifyBody(payment, sigFor(payment), { stateToken: expired }));
@@ -419,7 +419,7 @@ function rzSignature(orderId, paymentId) {
             v: 1, razorpayOrderId: payment.razorpayOrderId,
             name: CUSTOMER.name, dob: CUSTOMER.dob, birthplace: CUSTOMER.birthplace,
             tradition: CUSTOMER.tradition, photoHash: PHOTO, orderId: payment.orderId,
-            amount: 20, amountPaise: 2000, currency: 'USD',
+            amount: 9, amountPaise: 900, currency: 'USD',
             iat: nowSeconds(), exp: nowSeconds() + stateToken.TTL_SECONDS
         });
         const res = await callVerify(verifyBody(payment, sigFor(payment), { stateToken: usd }));
@@ -428,17 +428,17 @@ function rzSignature(orderId, paymentId) {
     });
 
     // ============================================================
-    // Architectural: I — ₹20 enforced server-side at order creation
+    // Architectural: I — ₹9 enforced server-side at order creation
     // ============================================================
-    await check('ARCH I: create-payment always creates order at expected ₹20', async () => {
+    await check('ARCH I: create-payment always creates order at expected ₹9', async () => {
         const restore = installFetchMock({ id: RZ_ORDER });
         try {
             await withEnv({ NODE_ENV: 'production', TOKEN_SECRET: SECRET, RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET }, async () => {
                 const res = makeRes();
                 await createPayment(req('POST', {}, { ...CUSTOMER, photoHash: PHOTO }), res);
                 assertEqual(res.statusCode, 200, 'status');
-                assertEqual(res._json.payment.amount, 20, 'rupees');
-                assertEqual(res._json.payment.amountPaise, 2000, 'paise');
+                assertEqual(res._json.payment.amount, 9, 'rupees');
+                assertEqual(res._json.payment.amountPaise, 900, 'paise');
                 assertEqual(res._json.payment.currency, 'INR', 'currency');
             });
         } finally {
