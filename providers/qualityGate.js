@@ -261,4 +261,89 @@ function evaluateQualityGate({ deterministicReview, aiReview, rewrittenReading, 
     };
 }
 
-module.exports = { evaluateQualityGate };
+/**
+ * Validates that a follow-up answer is written in the customer's detected
+ * language, using deterministic script analysis. Structure (section labels,
+ * non-empty body) is always checked; the script-share check only runs for
+ * languages where we ship native-script copy and the question itself was
+ * written in that script (romanized questions may legitimately receive a
+ * Latin-script answer, so callers pass nativeScriptRequired: false).
+ *
+ * The threshold tolerates natural mixed-language answers: labels, years and
+ * a few loanwords are expected. Only answers that are clearly dominated by
+ * Latin script when a native script was required are rejected.
+ *
+ * @param {string} answerHtml - Answer HTML to validate
+ * @param {string} language - Detected language ('hindi', 'telugu', ...)
+ * @param {Object} [options] - { nativeScriptRequired: boolean }
+ * @returns {Object} { valid: boolean, issues: string[] }
+ */
+function validateMultilingualAnswer(answerHtml, language, options) {
+    const issues = [];
+    const opts = options || {};
+    const nativeScriptRequired = opts.nativeScriptRequired !== false;
+
+    if (typeof answerHtml !== 'string' || answerHtml.trim().length === 0) {
+        return { valid: false, issues: ['answer is empty'] };
+    }
+
+    const text = answerHtml.replace(/<[^>]*>/g, ' ');
+    if (text.replace(/\s+/g, ' ').trim().length === 0) {
+        issues.push('answer body is empty after removing markup');
+    }
+
+    if (!hasSectionLabels(answerHtml)) {
+        issues.push('answer is missing section labels');
+    }
+
+    const scriptPattern = NATIVE_SCRIPT_PATTERNS[String(language || '').toLowerCase()];
+    if (nativeScriptRequired && scriptPattern) {
+        const bodyText = extractBodyText(answerHtml);
+        const nativeLetters = (bodyText.match(scriptPattern) || []).length;
+        const latinLetters = (bodyText.match(/[A-Za-z]/g) || []).length;
+        const totalLetters = nativeLetters + latinLetters;
+        if (totalLetters === 0) {
+            issues.push('answer script mismatch: no measurable script characters found');
+        } else {
+            const share = nativeLetters / totalLetters;
+            if (share < MIN_NATIVE_SCRIPT_SHARE) {
+                issues.push('answer script mismatch: expected ' + language +
+                    ' script share ' + share.toFixed(2) + ' below ' + MIN_NATIVE_SCRIPT_SHARE);
+            }
+        }
+    }
+
+    return { valid: issues.length === 0, issues };
+}
+
+const MIN_NATIVE_SCRIPT_SHARE = 0.25;
+
+const NATIVE_SCRIPT_PATTERNS = {
+    telugu: /[\p{Script=Telugu}]/gu,
+    hindi: /[\p{Script=Devanagari}]/gu,
+    tamil: /[\p{Script=Tamil}]/gu,
+    kannada: /[\p{Script=Kannada}]/gu,
+    malayalam: /[\p{Script=Malayalam}]/gu
+};
+
+function extractBodyText(answerHtml) {
+    const paragraphs = answerHtml.match(/<p[^>]*>[\s\S]*?<\/p>/gi);
+    if (paragraphs && paragraphs.length > 0) {
+        return paragraphs.map(p => p.replace(/<[^>]*>/g, ' ')).join(' ');
+    }
+    return answerHtml.replace(/<[^>]*>/g, ' ');
+}
+
+function hasSectionLabels(answerHtml) {
+    if (/class=["'][^"']*answer-label[^"']*["']/.test(answerHtml)) return true;
+    const headings = answerHtml.match(/<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>/gi) || [];
+    for (const heading of headings) {
+        const label = heading.replace(/<[^>]*>/g, '').trim();
+        if (label.length > 0 && label === label.toUpperCase() && /[A-Z]/.test(label)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+module.exports = { evaluateQualityGate, validateMultilingualAnswer };

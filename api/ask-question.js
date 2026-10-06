@@ -32,6 +32,19 @@ const nameMeaning = require('../lib/nameMeaning');
 const intentClassifier = require('../lib/questionIntent');
 const answerContract = require('../providers/answerContract');
 const followupQualityGate = require('../providers/followupQualityGate');
+const { detectLanguage, getLanguageDisplayName } = require('../lib/languageDetector');
+const { getLocalizedBundle } = require('../providers/answerTemplates');
+const { validateMultilingualAnswer } = require('../providers/qualityGate');
+
+// Provider error strings that must never reach a customer. When the provider
+// returns one of these the AI attempt is abandoned immediately (the same
+// deterministic error would come back on a retry) and the template answer is
+// served instead.
+const PROVIDER_ERROR_ANSWERS = [
+  'AI answer generation is currently unavailable. Please try again later.',
+  'Answer generation is temporarily unavailable. Please try again in a moment.',
+  'Answer generation encountered an issue. Please try again.'
+];
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -162,6 +175,12 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // --- Detect the customer's language once ---
+    // Single authoritative detection for this request. The template path, the
+    // AI prompt, both quality gates and the response metadata all read this
+    // value; nothing downstream re-detects.
+    const detectedLanguage = detectLanguage(question);
+
     // --- Compute astrology data (same as generate-reading) ---
     var astrologyData = null;
     try {
@@ -204,10 +223,15 @@ module.exports = async function handler(req, res) {
     const nameMeaningContext = questionIntent.domain === 'NAME_MEANING'
       ? nameMeaning.buildNameMeaningContext(questionIntent.name || name)
       : null;
-    if (useAi && process.env.GROQ_API_KEY) {
-      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext });
+    if (questionIntent.outOfScopeKind === 'model_privacy') {
+      // Model/provider privacy: answered here, before any provider call, so
+      // disclosure is structurally impossible rather than merely discouraged.
+      // The reply is always in the customer's detected language.
+      answer = buildRedirectAnswer(questionIntent, detectedLanguage);
+    } else if (useAi && process.env.GROQ_API_KEY) {
+      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext, detectedLanguage });
     } else {
-      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext });
+      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext, detectedLanguage });
     }
 
      // --- Issue next token ---
@@ -247,7 +271,9 @@ module.exports = async function handler(req, res) {
       remainingQuestions: Math.max(0, remaining),
       maxQuestions: questionToken.MAX_QUESTIONS,
       questionToken: newToken, // Client should store this for the next question
-      provider: useAi ? 'groq' : 'template'
+      provider: useAi ? 'groq' : 'template',
+      detectedLanguage: detectedLanguage,
+      languageDisplayName: getLanguageDisplayName(detectedLanguage)
     });
   } catch (err) {
     console.error('[ask-question] Error:', err);
@@ -494,15 +520,27 @@ function generateTemplateAnswer(params) {
     intent: intent
   });
 
+  // Localized copy for the customer's detected language. English (and the
+  // languages we ship no localized copy for) keep the exact maps below, so
+  // English output stays byte-identical.
+  const bundle = getLocalizedBundle(params.detectedLanguage);
+  const directMap = bundle ? bundle.direct : DOMAIN_DIRECT;
+  const descriptiveMap = bundle ? bundle.descriptive : DOMAIN_DESCRIPTIVE;
+  const evidenceMap = bundle ? bundle.evidence : DOMAIN_EVIDENCE;
+  const meaningMap = bundle ? bundle.meaning : DOMAIN_MEANING;
+  const bottomMap = bundle ? bundle.bottom : DOMAIN_BOTTOM_LINE;
+  const selfMap = bundle ? bundle.self : DOMAIN_SELF;
+  const periodFavorsBody = bundle ? bundle.periodFavors : PERIOD_FAVORS;
+  const periodAsksBody = bundle ? bundle.periodAsks : PERIOD_ASKS;
+
   // Out of scope: a short redirect, deliberately no astrology.
   if (intent.inScope === false) {
-    return '<h4 class="answer-label">DIRECT ANSWER</h4>\n<p class="reading-paragraph">' +
-      escapeHtml(answerContract.outOfScopeReply(intent)) + '</p>';
+    return buildRedirectAnswer(intent, params.detectedLanguage);
   }
 
   // Name meaning keeps its curated, dedicated rendering.
   if (domain === 'NAME_MEANING') {
-    return buildNameMeaningTemplateAnswer(params, factors);
+    return buildNameMeaningTemplateAnswer(params, factors, bundle);
   }
 
   const plan = answerContract.resolveSections(intent, timing);
@@ -519,39 +557,46 @@ function generateTemplateAnswer(params) {
     let body = '';
     switch (String(section).toUpperCase()) {
       case 'DIRECT ANSWER':
-        body = (intent.descriptive && DOMAIN_DESCRIPTIVE[domain]) || DOMAIN_DIRECT[domain] || DOMAIN_DIRECT.GENERAL;
+        body = (intent.descriptive && descriptiveMap[domain]) || directMap[domain] || directMap.GENERAL;
         break;
       case 'WHY THIS SHOWS UP':
-        body = buildEvidenceSentence(factors) + ' ' + (DOMAIN_EVIDENCE[domain] || DOMAIN_EVIDENCE.GENERAL);
+        // English prepends the English evidence sentence built from the chart
+        // factors. Localized copy omits it: factor text is English-only, and
+        // the language-neutral evidence line carries the same content.
+        body = bundle
+          ? (evidenceMap[domain] || evidenceMap.GENERAL)
+          : buildEvidenceSentence(factors) + ' ' + (DOMAIN_EVIDENCE[domain] || DOMAIN_EVIDENCE.GENERAL);
         break;
       case 'WHAT THIS MEANS FOR YOU':
-        body = DOMAIN_MEANING[domain] || DOMAIN_MEANING.GENERAL;
+        body = meaningMap[domain] || meaningMap.GENERAL;
         break;
       case 'WHAT THIS PERIOD FAVORS':
-        body = PERIOD_FAVORS;
+        body = periodFavorsBody;
         break;
       case 'WHAT THIS PERIOD ASKS OF YOU':
-        body = PERIOD_ASKS;
+        body = periodAsksBody;
         break;
       case 'WHAT THIS PERIOD IS ASKING OF YOU':
-        body = PERIOD_ASKS;
+        body = periodAsksBody;
         break;
       case 'WHAT THIS SAYS ABOUT YOU':
-        body = DOMAIN_SELF[domain] || (intent.descriptive && DOMAIN_DESCRIPTIVE[domain]) ||
-          DOMAIN_DIRECT[domain] || DOMAIN_DIRECT.GENERAL;
+        body = selfMap[domain] || (intent.descriptive && descriptiveMap[domain]) ||
+          directMap[domain] || directMap.GENERAL;
         break;
       case 'WHAT TO WORK WITH':
-        body = DOMAIN_MEANING[domain] || DOMAIN_MEANING.GENERAL;
+        body = meaningMap[domain] || meaningMap.GENERAL;
         break;
       case 'STRONGER WINDOW':
-        body = 'A stronger window sits around ' + escapeHtml(timing.window.text) +
-          ', and this period is best used to prepare for it rather than to rush it.';
+        body = bundle
+          ? bundle.strongerWindow.replace('{window}', timing.window.text)
+          : 'A stronger window sits around ' + escapeHtml(timing.window.text) +
+            ', and this period is best used to prepare for it rather than to rush it.';
         break;
       case 'BOTTOM LINE':
-        body = DOMAIN_BOTTOM_LINE[domain] || DOMAIN_BOTTOM_LINE.GENERAL;
+        body = bottomMap[domain] || bottomMap.GENERAL;
         break;
       default:
-        body = DOMAIN_MEANING[domain] || DOMAIN_MEANING.GENERAL;
+        body = meaningMap[domain] || meaningMap.GENERAL;
     }
 
     if (body) {
@@ -563,7 +608,36 @@ function generateTemplateAnswer(params) {
   return parts.join('\n');
 }
 
-function buildNameMeaningTemplateAnswer(params, factors) {
+/**
+ * Out-of-scope / privacy redirect rendered as a full answer, in the
+ * customer's detected language when localized copy exists for it.
+ */
+function buildRedirectAnswer(intent, detectedLanguage) {
+  const bundle = getLocalizedBundle(detectedLanguage);
+  let reply;
+  if (bundle) {
+    reply = intent && intent.outOfScopeKind === 'model_privacy'
+      ? bundle.redirect.modelPrivacy
+      : bundle.redirect.general;
+  } else {
+    reply = answerContract.outOfScopeReply(intent);
+  }
+  return '<h4 class="answer-label">DIRECT ANSWER</h4>\n<p class="reading-paragraph">' +
+    escapeHtml(reply) + '</p>';
+}
+
+function buildNameMeaningTemplateAnswer(params, factors, bundle) {
+  if (bundle) {
+    return [
+      '<h4 class="answer-label">DIRECT ANSWER</h4>',
+      '<p class="reading-paragraph">' + escapeHtml(bundle.nameMeaning.direct) + '</p>',
+      '<h4 class="answer-label">WHAT THE NAME CARRIES</h4>',
+      '<p class="reading-paragraph">' + escapeHtml(bundle.nameMeaning.carries) + '</p>',
+      '<h4 class="answer-label">BOTTOM LINE</h4>',
+      '<p class="reading-paragraph">' + escapeHtml(bundle.nameMeaning.bottom) + '</p>'
+    ].join('\n');
+  }
+
   const fallbackName = params.name || '';
   const intent = params.questionIntent || {};
   const context = params.nameMeaningContext ||
@@ -590,9 +664,15 @@ function buildNameMeaningTemplateAnswer(params, factors) {
 
 /**
  * Generate an AI-powered answer using the Groq provider.
+ *
+ * One retry is allowed when the answer fails the quality gate or comes back
+ * in the wrong language; after that the deterministic template answer is
+ * served. Provider error strings are filtered explicitly so a customer never
+ * sees an internal error message, and provider exceptions fall straight back
+ * to the template.
  */
 async function generateAiAnswer(provider, params) {
-  const question = params.question || '';
+  const detectedLanguage = params.detectedLanguage || null;
 
   // Deterministic answer is always built first: it is both the non-AI path and
   // the safe fallback when the AI answer fails the product quality gate.
@@ -602,18 +682,54 @@ async function generateAiAnswer(provider, params) {
     return templateAnswer;
   }
 
-  try {
-    const result = await provider.generateAnswer(params);
-    if (result && result.answer && result.answer.trim().length > 0) {
-      const verdict = followupQualityGate.evaluate(result.answer, params.questionIntent, params.timingContext);
-      if (verdict.ok) {
-        return result.answer;
+  // A question written in native script must receive a native-script answer.
+  // A romanized (pure ASCII) question legitimately receives a Latin-script
+  // answer, so the script-share checks are skipped for those.
+  const nativeScriptRequired = /[^\x00-\x7F]/.test(params.question || '');
+  const gateLanguage = nativeScriptRequired ? detectedLanguage : null;
+  const MAX_AI_ATTEMPTS = 2;
+
+  for (let attempt = 1; attempt <= MAX_AI_ATTEMPTS; attempt++) {
+    try {
+      const result = await provider.generateAnswer(params);
+      const aiAnswer = result && typeof result.answer === 'string' ? result.answer.trim() : '';
+
+      if (!aiAnswer) {
+        continue;
       }
-      console.warn('[ask-question] AI answer rejected by quality gate: ' + verdict.violations.join(', ') +
+
+      if (PROVIDER_ERROR_ANSWERS.indexOf(aiAnswer) !== -1) {
+        // Deterministic provider error: a retry would return the same string.
+        console.warn('[ask-question] provider returned a provider error answer; serving template');
+        break;
+      }
+
+      const verdict = followupQualityGate.evaluate(
+        aiAnswer, params.questionIntent, params.timingContext, gateLanguage);
+      const languageCheck = validateMultilingualAnswer(
+        aiAnswer, detectedLanguage, { nativeScriptRequired: nativeScriptRequired });
+
+      if (verdict.ok && languageCheck.valid) {
+        return aiAnswer;
+      }
+
+      const reasons = verdict.violations.concat(languageCheck.issues);
+      console.warn('[ask-question] AI answer rejected (attempt ' + attempt + '/' + MAX_AI_ATTEMPTS + '): ' +
+        reasons.join(', ') +
         ' (severity=' + verdict.severity + ' jargon=' + verdict.metrics.jargon + '/' + verdict.metrics.words + ')');
+    } catch (err) {
+      console.warn('[ask-question] AI answer generation failed:', err.message);
+      break;
     }
-  } catch (err) {
-    console.warn('[ask-question] AI answer generation failed:', err.message);
+  }
+
+  // Re-validate the fallback to the same structural standard. The script
+  // check is skipped: the template is either localized copy we ship, or the
+  // expected English fallback for a language we ship no copy for.
+  const templateCheck = validateMultilingualAnswer(
+    templateAnswer, detectedLanguage, { nativeScriptRequired: false });
+  if (!templateCheck.valid) {
+    console.warn('[ask-question] template fallback failed validation: ' + templateCheck.issues.join(', '));
   }
 
   return templateAnswer;

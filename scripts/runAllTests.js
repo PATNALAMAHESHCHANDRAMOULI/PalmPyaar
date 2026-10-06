@@ -21,6 +21,7 @@ const suites = [
   'scripts/testQuestionFlow.js',
   'scripts/testAnswerQuality.js',
   'scripts/testFollowupIntentQuality.js',
+  'scripts/testMultilingualFollowUp.js',
   'scripts/testTimingEngine.js',
   'scripts/testShareCard.js'
 ];

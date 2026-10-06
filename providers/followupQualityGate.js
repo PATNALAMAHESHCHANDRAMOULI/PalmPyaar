@@ -97,8 +97,48 @@ const OUT_OF_SCOPE_LEAK = [
   /\b(here is|here's) (the )?(code|program|script|function)\b/i
 ];
 
-/** Convert answer HTML to plain text with no markup and no section markers. */
-function stripHtml(html) {
+/**
+ * Native script of each language we ship localized copy for, plus the brand
+ * written in that script. An out-of-scope redirect in the customer's language
+ * names PalmPyaar in native script rather than the ASCII phrases used by the
+ * English reply, so the redirect check must accept both.
+ */
+const NATIVE_SCRIPTS = {
+  telugu: /[\p{Script=Telugu}]/gu,
+  hindi: /[\p{Script=Devanagari}]/gu,
+  tamil: /[\p{Script=Tamil}]/gu,
+  kannada: /[\p{Script=Kannada}]/gu,
+  malayalam: /[\p{Script=Malayalam}]/gu
+};
+
+const NATIVE_BRAND_REDIRECT = {
+  telugu: /పాల్మ్‌ప్యార్|పాల్మ్ప్యార్/,
+  hindi: /पाल्म्प्यार/,
+  tamil: /பால்ம்பியார்/,
+  kannada: /ಪಾಲ್ಮ್‌ಪ್ಯಾರ್|ಪಾಲ್ಮ್ಪ್ಯಾರ್/,
+  malayalam: /പാല്മ്പ്യാർ/
+};
+
+/**
+ * Share of native-script letters in the answer body. Section labels are Latin
+ * by design in every language, so they are excluded before measuring. A
+ * threshold of 0.25 tolerates natural mixed-language answers (labels, years,
+ * loanwords) while rejecting clearly-English ones.
+ */
+const MIN_NATIVE_SCRIPT_SHARE = 0.25;
+
+function nativeScriptShare(text, language) {
+  const pattern = NATIVE_SCRIPTS[String(language || '').toLowerCase()];
+  if (!pattern) return null;
+  const body = String(text || '');
+  const native = (body.match(pattern) || []).length;
+  const latin = (body.match(/[A-Za-z]/g) || []).length;
+  const total = native + latin;
+  if (total === 0) return 0;
+  return native / total;
+}
+
+/** Convert answer HTML to plain text with no markup and no section markers. */function stripHtml(html) {
   return String(html || '')
     .replace(/<h4[^>]*>[\s\S]*?<\/h4>/gi, '\n\n')
     .replace(/<[^>]+>/g, ' ')
@@ -164,9 +204,12 @@ function hasPattern(text, patterns) {
  * @param {string} answerHtml
  * @param {object} intent  from lib/questionIntent.classifyQuestion
  * @param {object|null} timingContext
+ * @param {string|null} [detectedLanguage] - customer's detected language;
+ *   pass null for romanized questions (a Latin-script answer is legitimate)
+ *   and for languages where we ship no localized copy.
  * @returns {{ ok: boolean, violations: string[], severity: string, metrics: object }}
  */
-function evaluate(answerHtml, intent, timingContext) {
+function evaluate(answerHtml, intent, timingContext, detectedLanguage) {
   const violations = [];
   const domain = (intent && intent.domain) || 'GENERAL';
   const text = stripHtml(answerHtml);
@@ -179,6 +222,11 @@ function evaluate(answerHtml, intent, timingContext) {
     firstSectionJargon: countJargon(firstSection(answerHtml)),
     sections: (String(answerHtml || '').match(/<h4[^>]*>/gi) || []).length
   };
+
+  const scriptShare = nativeScriptShare(text, detectedLanguage);
+  if (scriptShare !== null) {
+    metrics.nativeScriptShare = Math.round(scriptShare * 100) / 100;
+  }
 
   // --- 0. Non-empty ---
   if (!text || metrics.words < 15) {
@@ -242,7 +290,10 @@ function evaluate(answerHtml, intent, timingContext) {
       violations.push('OUT_OF_SCOPE_TOO_LONG');
     }
     const astrologyLeak = /\b(dasha|nakshatra|mahadasha|antardasha|ascendant|rashi|horoscope)\b/i.test(lower);
-    if (!astrologyLeak && !/palmpy aar|palmpy aar/i.test(lower) && !/focused on your/i.test(lower) && !/here to focus/i.test(lower)) {
+    const englishRedirect = /palmpy aar|palmpy aar/i.test(lower) || /focused on your/i.test(lower) || /here to focus/i.test(lower);
+    const nativeBrand = NATIVE_BRAND_REDIRECT[String(detectedLanguage || '').toLowerCase()];
+    const nativeRedirect = !!(nativeBrand && nativeBrand.test(text));
+    if (!astrologyLeak && !englishRedirect && !nativeRedirect) {
       violations.push('OUT_OF_SCOPE_NO_REDIRECT');
     }
   }
@@ -253,10 +304,18 @@ function evaluate(answerHtml, intent, timingContext) {
     metrics.intimacyHandled = true;
   }
 
+  // --- 11. Answer must actually be in the customer's language ---
+  // Labels, years and a few loanwords are expected in any language, so only
+  // answers that are clearly dominated by Latin script are rejected. A null
+  // detectedLanguage (romanized question or unsupported language) skips this.
+  if (scriptShare !== null && scriptShare < MIN_NATIVE_SCRIPT_SHARE) {
+    violations.push('WRONG_LANGUAGE');
+  }
+
   const hard = violations.filter(v => [
     'EMPTY_OR_TOO_SHORT', 'MISSING_DIRECT_ANSWER_SECTION', 'GUARANTEED_PREDICTION',
     'PROVIDER_DISCLOSURE', 'SECRET_DISCLOSURE', 'GRAPHIC_CONTENT',
-    'OUT_OF_SCOPE_ANSWERED', 'OUT_OF_SCOPE_NO_REDIRECT'
+    'OUT_OF_SCOPE_ANSWERED', 'OUT_OF_SCOPE_NO_REDIRECT', 'WRONG_LANGUAGE'
   ].indexOf(v) !== -1);
 
   const soft = violations.filter(v => hard.indexOf(v) === -1);

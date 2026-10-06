@@ -9,6 +9,8 @@
  * @module providers/promptRepository
  */
 
+const { getLanguageDisplayName } = require('../lib/languageDetector');
+
 function getSystemIdentity() {
     return {
         id: "system_identity",
@@ -400,6 +402,79 @@ QUALITY REMINDER: The opening is the highest-attention real estate. It was selec
     };
 }
 
+const LANGUAGE_SCRIPT_NAMES = {
+    telugu: 'Telugu script',
+    hindi: 'Devanagari script',
+    tamil: 'Tamil script',
+    kannada: 'Kannada script',
+    malayalam: 'Malayalam script',
+    bengali: 'Bengali script',
+    gujarati: 'Gujarati script',
+    punjabi: 'Gurmukhi script',
+    odia: 'Odia script',
+    urdu: 'Nastaliq script'
+};
+
+/**
+ * Multilingual output rules for the follow-up answer prompt. Appended by the
+ * provider when the customer's language was detected once in the API layer and
+ * passed through as params.detectedLanguage — detection never happens twice.
+ *
+ * Section labels are structural markers the front-end and quality gate match
+ * on, so they stay English in every language; only the answer prose is
+ * localized. Years and the derived timing window are language-neutral data.
+ *
+ * @param {string|null} language - detected language code, or null for auto-detect
+ * @returns {{ id: string, title: string, version: string, content: string }}
+ */
+function getMultilingualRules(language) {
+    const code = typeof language === 'string' ? language.toLowerCase() : null;
+
+    if (!code) {
+        return {
+            id: "multilingual_rules",
+            title: "Multilingual Answer Rules",
+            version: "1.0.0",
+            content: `The customer wrote in the user's language. Your answer MUST be written entirely in the user's language — detect it from the CUSTOMER QUESTION above and answer in that same language, never in English.
+
+Section labels stay in English as-is in every language: DIRECT ANSWER, WHY THIS SHOWS UP, WHAT THIS MEANS FOR YOU, WHAT THIS PERIOD FAVORS, WHAT THIS PERIOD ASKS OF YOU, WHAT THIS SAYS ABOUT YOU, WHAT TO WORK WITH, STRONGER WINDOW, BOTTOM LINE, and the timing window label. Do not translate section labels — they are structural markers.
+
+- Keep years, dates and the derived timing window exactly as given — numbers pass through unchanged.
+- Translate evidence and reasoning into natural, conversational prose in that language; never quote English chart text verbatim.
+- Sound like a trusted counsellor speaking to one customer, not like a translation.`
+        };
+    }
+
+    const displayName = getLanguageDisplayName(code);
+    const scriptName = LANGUAGE_SCRIPT_NAMES[code] || 'its native script';
+
+    if (code === 'english') {
+        return {
+            id: "multilingual_rules",
+            title: "Multilingual Answer Rules",
+            version: "1.0.0",
+            content: `The customer wrote in English. Your answer MUST be written entirely in English.
+
+Section labels stay in English as-is: DIRECT ANSWER, WHY THIS SHOWS UP, WHAT THIS MEANS FOR YOU, WHAT THIS PERIOD FAVORS, WHAT THIS PERIOD ASKS OF YOU, WHAT THIS SAYS ABOUT YOU, WHAT TO WORK WITH, STRONGER WINDOW, BOTTOM LINE, and the timing window label. Do not translate section labels — they are structural markers.
+
+- Keep years, dates and the derived timing window exactly as given — numbers pass through unchanged.`
+        };
+    }
+
+    return {
+        id: "multilingual_rules",
+        title: "Multilingual Answer Rules",
+        version: "1.0.0",
+        content: `The customer wrote in ${displayName}. Your answer MUST be written entirely in ${displayName} (${scriptName}). Never answer in English — a fully English answer will be rejected before the customer sees it.
+
+Section labels stay in English as-is in every language: DIRECT ANSWER, WHY THIS SHOWS UP, WHAT THIS MEANS FOR YOU, WHAT THIS PERIOD FAVORS, WHAT THIS PERIOD ASKS OF YOU, WHAT THIS SAYS ABOUT YOU, WHAT TO WORK WITH, STRONGER WINDOW, BOTTOM LINE, and the timing window label (for example OUTLOOK WINDOW). Do not translate section labels — they are structural markers the interface matches on.
+
+- Keep years, dates and the derived timing window exactly as given — numbers pass through unchanged.
+- Translate evidence and reasoning into natural, conversational ${displayName}; never quote English chart text verbatim.
+- Sound like a trusted counsellor speaking to one customer in ${displayName}, not like a word-for-word translation.`
+    };
+}
+
 module.exports = {
     getSystemIdentity,
     getWritingIdentity,
@@ -411,5 +486,6 @@ module.exports = {
     getNegativeRules,
     getQualityRules,
     getOutputRules,
-    getWriterSafetyInstructions
+    getWriterSafetyInstructions,
+    getMultilingualRules
 };
