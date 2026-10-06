@@ -33,8 +33,9 @@ const intentClassifier = require('../lib/questionIntent');
 const answerContract = require('../providers/answerContract');
 const followupQualityGate = require('../providers/followupQualityGate');
 const { detectLanguage, getLanguageDisplayName } = require('../lib/languageDetector');
-const { getLocalizedBundle } = require('../providers/answerTemplates');
+const { getLocalizedBundle, getPhotoRequest } = require('../providers/answerTemplates');
 const { validateMultilingualAnswer } = require('../providers/qualityGate');
+const palmValidator = require('../js/palmValidator');
 
 // Provider error strings that must never reach a customer. When the provider
 // returns one of these the AI attempt is abandoned immediately (the same
@@ -181,6 +182,31 @@ module.exports = async function handler(req, res) {
     // value; nothing downstream re-detects.
     const detectedLanguage = detectLanguage(question);
 
+    // --- Server-side palm-evidence guard ---
+    // When the browser captured a palm photo, palmEvidence travels with the
+    // request; if that evidence is unusable (back of hand, cropped, degenerate,
+    // fingers closed, sideways, too small), stop here with a localized photo
+    // request instead of generating an answer from evidence we cannot trust.
+    // Missing evidence is the legacy geometry-less path and is never rejected.
+    if (palmEvidence) {
+      var evidenceForCheck = null;
+      try {
+        evidenceForCheck = typeof palmEvidence === 'string'
+          ? JSON.parse(palmEvidence)
+          : palmEvidence;
+      } catch (e) {
+        evidenceForCheck = null;
+      }
+      const evidenceProblem = palmValidator.assessEvidenceUsability(evidenceForCheck);
+      if (evidenceProblem) {
+        return res.status(400).json({
+          success: false,
+          error: getPhotoRequest(detectedLanguage),
+          code: 'PHOTO_UNUSABLE'
+        });
+      }
+    }
+
     // --- Compute astrology data (same as generate-reading) ---
     var astrologyData = null;
     try {
@@ -210,7 +236,8 @@ module.exports = async function handler(req, res) {
       outOfScopeKind: questionIntentResult.outOfScopeKind,
       adult: questionIntentResult.adult,
       evaluation: questionIntentResult.evaluation,
-      descriptive: questionIntentResult.descriptive
+      descriptive: questionIntentResult.descriptive,
+      scores: questionIntentResult.scores
     };
     const timingContext = questionIntent.topic === 'name-meaning'
       ? { supported: false, topic: questionIntent.topic }
@@ -223,10 +250,12 @@ module.exports = async function handler(req, res) {
     const nameMeaningContext = questionIntent.domain === 'NAME_MEANING'
       ? nameMeaning.buildNameMeaningContext(questionIntent.name || name)
       : null;
-    if (questionIntent.outOfScopeKind === 'model_privacy') {
-      // Model/provider privacy: answered here, before any provider call, so
-      // disclosure is structurally impossible rather than merely discouraged.
-      // The reply is always in the customer's detected language.
+    if (questionIntent.outOfScopeKind === 'model_privacy' ||
+        questionIntent.outOfScopeKind === 'product_how_it_works') {
+      // Model/provider privacy and product "how it works": answered here,
+      // before any provider call, so disclosure is structurally impossible
+      // rather than merely discouraged. The reply is always in the
+      // customer's detected language.
       answer = buildRedirectAnswer(questionIntent, detectedLanguage);
     } else if (useAi && process.env.GROQ_API_KEY) {
       answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext, detectedLanguage });
@@ -616,9 +645,14 @@ function buildRedirectAnswer(intent, detectedLanguage) {
   const bundle = getLocalizedBundle(detectedLanguage);
   let reply;
   if (bundle) {
-    reply = intent && intent.outOfScopeKind === 'model_privacy'
-      ? bundle.redirect.modelPrivacy
-      : bundle.redirect.general;
+    const kind = intent && intent.outOfScopeKind;
+    if (kind === 'model_privacy') {
+      reply = bundle.redirect.modelPrivacy;
+    } else if (kind === 'product_how_it_works') {
+      reply = bundle.productHowItWorks;
+    } else {
+      reply = bundle.redirect.general;
+    }
   } else {
     reply = answerContract.outOfScopeReply(intent);
   }
@@ -688,10 +722,16 @@ async function generateAiAnswer(provider, params) {
   const nativeScriptRequired = /[^\x00-\x7F]/.test(params.question || '');
   const gateLanguage = nativeScriptRequired ? detectedLanguage : null;
   const MAX_AI_ATTEMPTS = 2;
+  // Reasons from the previous failed attempt, handed to the provider on the
+  // single controlled regeneration so attempt 2 can fix exactly what failed.
+  let previousRejection = '';
 
   for (let attempt = 1; attempt <= MAX_AI_ATTEMPTS; attempt++) {
     try {
-      const result = await provider.generateAnswer(params);
+      const genParams = previousRejection
+        ? Object.assign({}, params, { previousRejection: previousRejection })
+        : params;
+      const result = await provider.generateAnswer(genParams);
       const aiAnswer = result && typeof result.answer === 'string' ? result.answer.trim() : '';
 
       if (!aiAnswer) {
@@ -714,6 +754,7 @@ async function generateAiAnswer(provider, params) {
       }
 
       const reasons = verdict.violations.concat(languageCheck.issues);
+      previousRejection = reasons.join(', ');
       console.warn('[ask-question] AI answer rejected (attempt ' + attempt + '/' + MAX_AI_ATTEMPTS + '): ' +
         reasons.join(', ') +
         ' (severity=' + verdict.severity + ' jargon=' + verdict.metrics.jargon + '/' + verdict.metrics.words + ')');

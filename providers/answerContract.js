@@ -209,9 +209,17 @@ const MODEL_PRIVACY_REDIRECT =
   "I'm here to focus on your PalmPyaar reading and the questions you have about your life. " +
   'Ask me about your love life, career, relationships, timing, or personal themes.';
 
+const PRODUCT_HOW_IT_WORKS_REDIRECT =
+  "PalmPyaar works from a photo of your open palm. The app reads your hand's shape and finger geometry on your device, " +
+  'and an AI builds your personalised reading from that geometry together with classical palmistry tradition. ' +
+  'Your reading is generated for you — there is no palmist to visit and nothing to install. ' +
+  'For a question about your life, ask away — that is what your reading is for.';
+
 function outOfScopeReply(intent) {
   const kind = intent && intent.outOfScopeKind;
-  return kind === 'model_privacy' ? MODEL_PRIVACY_REDIRECT : OUT_OF_SCOPE_REDIRECT;
+  if (kind === 'model_privacy') return MODEL_PRIVACY_REDIRECT;
+  if (kind === 'product_how_it_works') return PRODUCT_HOW_IT_WORKS_REDIRECT;
+  return OUT_OF_SCOPE_REDIRECT;
 }
 
 /* -------------------------------------------------------------------------
@@ -295,6 +303,7 @@ module.exports = {
   outOfScopeReply,
   OUT_OF_SCOPE_REDIRECT,
   MODEL_PRIVACY_REDIRECT,
+  PRODUCT_HOW_IT_WORKS_REDIRECT,
   TECHNIQUE_GLOSSARY,
   HOUSE_THEMES,
   PLANET_THEMES

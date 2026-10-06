@@ -11,6 +11,8 @@ const { reviewReading } = require('./reviewEngine');
 const { buildRewritePrompt } = require('./rewritePromptBuilder');
 const promptRepository = require('./promptRepository');
 const { getLocalizedBundle } = require('./answerTemplates');
+const { formatPalmGeometryEvidence } = require('./palmGeometryFormatter');
+const { isValidPalmEvidence } = require('../lib/palmEvidenceValidator');
 const OpenAI = require('openai');
 
 // Current production model on the Groq OpenAI-compatible API.
@@ -593,6 +595,8 @@ async function generateAnswer(params) {
   if (!question) {
     return { answer: 'Please ask a question.' };
   }
+  // Reasons from a previous rejected attempt (attempt 2 of 2 only). Model-facing.
+  const previousRejection = params.previousRejection ? String(params.previousRejection) : '';
 
   const answerContract = require('./answerContract');
 
@@ -604,9 +608,13 @@ async function generateAnswer(params) {
     const bundle = getLocalizedBundle(params.detectedLanguage);
     let reply;
     if (bundle) {
-      reply = params.questionIntent.outOfScopeKind === 'model_privacy'
-        ? bundle.redirect.modelPrivacy
-        : bundle.redirect.general;
+      if (params.questionIntent.outOfScopeKind === 'product_how_it_works') {
+        reply = bundle.productHowItWorks;
+      } else if (params.questionIntent.outOfScopeKind === 'model_privacy') {
+        reply = bundle.redirect.modelPrivacy;
+      } else {
+        reply = bundle.redirect.general;
+      }
     } else {
       reply = answerContract.outOfScopeReply(params.questionIntent);
     }
@@ -634,6 +642,13 @@ async function generateAnswer(params) {
     const astroSummary = JSON.stringify(followUpAstrologyContext);
     const timingContext = params.timingContext || null;
     const nameMeaningContext = params.nameMeaningContext || null;
+    // Whitelisted palm geometry only: evidence must pass the server-side
+    // whitelist first (the formatter's documented input contract), then the
+    // formatter emits numeric measurements plus its own no-named-palmistry-
+    // claims rules. Missing or invalid evidence yields '' (legacy path).
+    const palmGeometryBlock = isValidPalmEvidence(params.palmEvidence)
+      ? formatPalmGeometryEvidence(params.palmEvidence)
+      : '';
 
     var derivedContext = '';
     if (nameMeaningContext && nameMeaningContext.summary) {
@@ -672,6 +687,9 @@ async function generateAnswer(params) {
     const prompt =
       'You are PalmPyaar, answering one follow-up question about the customer\'s own personalised reading.\n\n' +
       'CUSTOMER QUESTION: "' + question + '"\n\n' +
+      (previousRejection
+        ? '=== PREVIOUS ATTEMPT WAS REJECTED BECAUSE: ' + previousRejection + ' ===\nFix every listed problem and do not repeat any of them.\n\n'
+        : '') +
       'QUESTION INTERPRETATION: ' + intentForPrompt.domain +
         (intentForPrompt.evaluation ? ' (the customer is asking how their current period is treating them overall)' : '') + '.\n' +
       'Tradition: ' + tradition + '. Use only this tradition\'s terminology; never mix traditions.\n\n' +
@@ -679,6 +697,11 @@ async function generateAnswer(params) {
       answerContract.buildDirectAnswerInstruction(intentForPrompt) + '\n\n' +
       '=== STRUCTURE ===\n' +
       answerContract.buildSectionInstruction(intentForPrompt, plan.sections, plan.hasWindow) + '\n\n' +
+      '=== GROUNDING ===\n' +
+      '- Answer the question that was asked. If it asks what something is like ("what kind of", "describe"), give a description of tendencies — never a date or an event.\n' +
+      '- If it asks for a count ("how many", "ఎన్ని", "ఎంతమంది", "ఎంత", "kitne", "entha mandi", "எத்தனை", "ಎಷ್ಟು"), hedge the number (", roughly", "in the range of") — never state an exact count as fact.\n' +
+      '- If it asks when, give only the supplied time window; when none was supplied, say plainly that the evidence does not fix a date.\n' +
+      '- Otherwise open with the direct answer itself.\n\n' +
       '=== LANGUAGE ===\n' +
       answerContract.buildLanguageRules(intentForPrompt).map(function (r, i) { return (i + 1) + '. ' + r; }).join('\n') + '\n\n' +
       (multilingualRules ? '=== ANSWER LANGUAGE ===\n' + multilingualRules + '\n\n' : '') +
@@ -687,9 +710,12 @@ async function generateAnswer(params) {
       'Stay focused on the customer\'s own life and reading. Do not answer general knowledge, coding, technical, financial-market or unrelated questions.\n\n' +
       '=== EVIDENCE (authoritative — the only facts you may use) ===\n' +
       (derivedContext ? derivedContext + '\n' : '') +
+      (palmGeometryBlock ? palmGeometryBlock + '\n' : '') +
       (glossary ? 'Plain-language translation reference for the technical terms above:\n' + glossary + '\n' : '') +
       'Compact chart context: ' + (astroSummary || 'none calculated') + '.\n' +
-      'Never invent chart placements, houses, nakshatras, planetary periods, aspects, dates, events, past history or personal experiences. If the evidence is thinner than the question, answer the part the evidence supports and say plainly what it cannot show.\n\n' +
+      'Never invent chart placements, houses, nakshatras, planetary periods, aspects, dates, events, past history or personal experiences. ' +
+      'Never claim to observe palm lines (heart, head, life, fate), creases, mounts or markings, and never describe the customer\'s hand beyond the geometry evidence supplied above. ' +
+      'If the evidence is thinner than the question, answer the part the evidence supports and say plainly what it cannot show.\n\n' +
       '=== OUTPUT ===\n' +
       'Return HTML only, using <h4 class="answer-label">' + answerContract.DIRECT_ANSWER_LABEL + '</h4> for the first label, ' +
       '<p class="reading-paragraph"> for paragraphs, and <p class="answer-window"> only for the derived timing period. ' +

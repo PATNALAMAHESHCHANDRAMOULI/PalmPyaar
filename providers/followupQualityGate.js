@@ -16,6 +16,8 @@
 
 'use strict';
 
+const { classifyQuestion } = require('../lib/questionIntent');
+
 /**
  * Technical vocabulary that must never lead an answer or dominate it.
  * Kept deliberately narrow so ordinary words ("career", "partner") do not
@@ -98,6 +100,39 @@ const OUT_OF_SCOPE_LEAK = [
 ];
 
 /**
+ * Named palm lines, mounts, and "your palm shows ..." claims. The follow-up
+ * flow never receives palm-line observations — palm evidence is geometry
+ * only (palmBounds, fingerRatios, geometricRatios, palmAngle) — and both the
+ * prompt and the palm geometry formatter forbid naming lines or mounts. Any
+ * answer that claims one is inventing it, in any language.
+ */
+const PALM_CLAIM_PATTERNS = [
+  /\b(heart|head|life|fate) line\b/i,
+  /\bmount(s)? of\b/i,
+  /\bpalm lines?\b/i,
+  /\byour palm (shows|says|reveals|indicates)\b/i,
+  /హృదయ రేఖ|జీవన రేఖ|బుద్ధి రేఖ/,
+  /हृदय रेखा|आयु रेखा/,
+  /இதயக் கோடு|வாழ்க்கைக் கோடு/,
+  /ಹೃದಯರೇಖೆ/,
+  /ഹൃദയരേഖ/
+];
+
+/**
+ * Unsupported specificity: day-level dates, fixed countdown timeframes, and
+ * exact child counts. Bare years and year ranges ("2026", "2026-2028") are
+ * legitimate — that is the format timingEngine.windows use — and are not
+ * matched.
+ */
+const UNSUPPORTED_SPECIFICITY_PATTERNS = [
+  /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i,
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?!\d)\b/i,
+  /\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/,
+  /\bin (?:about )?\d{1,4} (?:days?|weeks?|months?|years?)\b/i,
+  /\b\d{1,2}\s+(?:children|kids|babies)\b/i
+];
+
+/**
  * Native script of each language we ship localized copy for, plus the brand
  * written in that script. An out-of-scope redirect in the customer's language
  * names PalmPyaar in native script rather than the ASCII phrases used by the
@@ -116,7 +151,9 @@ const NATIVE_BRAND_REDIRECT = {
   hindi: /पाल्म्प्यार/,
   tamil: /பால்ம்பியார்/,
   kannada: /ಪಾಲ್ಮ್‌ಪ್ಯಾರ್|ಪಾಲ್ಮ್ಪ್ಯಾರ್/,
-  malayalam: /പാല്മ്പ്യാർ/
+  // The bundle spells the brand with പാൽ (chillu + virama), the general
+  // redirect with പാല്മ്; both spellings must pass the redirect check.
+  malayalam: /പാല്മ്പ്യാർ|പാൽമ്പ്യാർ/
 };
 
 /**
@@ -290,11 +327,47 @@ function evaluate(answerHtml, intent, timingContext, detectedLanguage) {
       violations.push('OUT_OF_SCOPE_TOO_LONG');
     }
     const astrologyLeak = /\b(dasha|nakshatra|mahadasha|antardasha|ascendant|rashi|horoscope)\b/i.test(lower);
-    const englishRedirect = /palmpy aar|palmpy aar/i.test(lower) || /focused on your/i.test(lower) || /here to focus/i.test(lower);
+    if (astrologyLeak && violations.indexOf('OUT_OF_SCOPE_ANSWERED') === -1) {
+      violations.push('OUT_OF_SCOPE_ANSWERED');
+    }
+    const isProductRedirect = intent.outOfScopeKind === 'product_how_it_works';
+    const englishRedirect = /palmpy aar|palmpy aar/i.test(lower) ||
+      (isProductRedirect && /\bpalmpyaar\b/i.test(lower)) ||
+      /focused on your/i.test(lower) || /here to focus/i.test(lower);
     const nativeBrand = NATIVE_BRAND_REDIRECT[String(detectedLanguage || '').toLowerCase()];
     const nativeRedirect = !!(nativeBrand && nativeBrand.test(text));
     if (!astrologyLeak && !englishRedirect && !nativeRedirect) {
       violations.push('OUT_OF_SCOPE_NO_REDIRECT');
+    }
+  }
+
+  // --- 9b. Never claim named palm lines or mounts (geometry is the only evidence) ---
+  if (hasPattern(text, PALM_CLAIM_PATTERNS)) {
+    violations.push('UNSUPPORTED_PALM_CLAIM');
+  }
+
+  // --- 9c. No day-level dates, fixed countdowns, or exact child counts ---
+  if (hasPattern(text, UNSUPPORTED_SPECIFICITY_PATTERNS)) {
+    violations.push('UNSUPPORTED_SPECIFICITY');
+  }
+
+  // --- 9d. The answer must address the domain that was asked ---
+  // Only fires when the question itself scored zero on its own domain (so an
+  // ambiguous question that legitimately won its domain is never flagged),
+  // the question was in scope, and the answer strongly classifies as a
+  // different domain. An answer that generalises (answer domain GENERAL) is
+  // always allowed.
+  if (intent && intent.inScope !== false &&
+      domain !== 'GENERAL' && domain !== 'NAME_MEANING' &&
+      ((intent.scores && intent.scores[domain]) || 0) === 0) {
+    const answerIntent = classifyQuestion(text);
+    const answerScores = answerIntent.scores || {};
+    let answerBest = 0;
+    for (const key of Object.keys(answerScores)) {
+      if (answerScores[key] > answerBest) answerBest = answerScores[key];
+    }
+    if (answerIntent.domain !== domain && answerIntent.domain !== 'GENERAL' && answerBest >= 4) {
+      violations.push('QUESTION_NOT_ADDRESSED');
     }
   }
 
@@ -315,7 +388,8 @@ function evaluate(answerHtml, intent, timingContext, detectedLanguage) {
   const hard = violations.filter(v => [
     'EMPTY_OR_TOO_SHORT', 'MISSING_DIRECT_ANSWER_SECTION', 'GUARANTEED_PREDICTION',
     'PROVIDER_DISCLOSURE', 'SECRET_DISCLOSURE', 'GRAPHIC_CONTENT',
-    'OUT_OF_SCOPE_ANSWERED', 'OUT_OF_SCOPE_NO_REDIRECT', 'WRONG_LANGUAGE'
+    'OUT_OF_SCOPE_ANSWERED', 'OUT_OF_SCOPE_NO_REDIRECT', 'WRONG_LANGUAGE',
+    'QUESTION_NOT_ADDRESSED', 'UNSUPPORTED_PALM_CLAIM', 'UNSUPPORTED_SPECIFICITY'
   ].indexOf(v) !== -1);
 
   const soft = violations.filter(v => hard.indexOf(v) === -1);

@@ -22,8 +22,12 @@ const suites = [
   'scripts/testAnswerQuality.js',
   'scripts/testFollowupIntentQuality.js',
   'scripts/testMultilingualFollowUp.js',
+  'scripts/testPalmImageValidation.js',
+  'scripts/testAnswerGrounding.js',
   'scripts/testTimingEngine.js',
-  'scripts/testShareCard.js'
+  'scripts/testShareCard.js',
+  'scripts/testPalmSideDetection.js',
+  'scripts/testPalmSideRealImages.js'
 ];
 
 let failed = 0;
