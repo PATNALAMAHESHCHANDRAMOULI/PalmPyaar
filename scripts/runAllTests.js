@@ -29,7 +29,8 @@ const suites = [
   'scripts/testPalmSideDetection.js',
   'scripts/testPalmSideRealImages.js',
   'scripts/testPalmRegressionFix.js',
-  'scripts/testPaymentFix.js'
+  'scripts/testPaymentFix.js',
+  'scripts/testAiReaderGrounded.js'
 ];
 
 let failed = 0;

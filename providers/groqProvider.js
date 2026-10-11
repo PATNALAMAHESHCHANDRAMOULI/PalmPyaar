@@ -604,6 +604,10 @@ async function generateAnswer(params) {
   // disclosure is structurally impossible rather than merely discouraged by a
   // prompt instruction. The reply is in the customer's detected language when
   // we ship localized copy for it; detection happened once in the API layer.
+  // Scope + model-privacy guard. Resolved here, before any provider call, so
+  // disclosure is structurally impossible rather than merely discouraged by a
+  // prompt instruction. The reply is in the customer's detected language when
+  // we ship localized copy for it; detection happened once in the API layer.
   if (params.questionIntent && params.questionIntent.inScope === false) {
     const bundle = getLocalizedBundle(params.detectedLanguage);
     let reply;
@@ -612,6 +616,8 @@ async function generateAnswer(params) {
         reply = bundle.productHowItWorks;
       } else if (params.questionIntent.outOfScopeKind === 'model_privacy') {
         reply = bundle.redirect.modelPrivacy;
+      } else if (params.questionIntent.outOfScopeKind === 'technical_coding' && bundle.redirect && bundle.redirect.technicalCoding) {
+        reply = bundle.redirect.technicalCoding;
       } else {
         reply = bundle.redirect.general;
       }
@@ -670,6 +676,7 @@ async function generateAnswer(params) {
       timing: !!(intent && intent.timing),
       adult: !!(intent && intent.adult),
       evaluation: !!(intent && intent.evaluation),
+      isFollowup: !!(intent && intent.isFollowup),
       inScope: intent ? intent.inScope !== false : true,
       outOfScopeKind: intent ? intent.outOfScopeKind : null
     };
@@ -680,9 +687,18 @@ async function generateAnswer(params) {
     // once in api/ask-question and is passed through — never re-detected here.
     // English answers keep the exact prompt they had before this feature.
     const detectedLanguage = params.detectedLanguage || null;
+    const isRomanized = !/[^\x00-\x7F]/.test(question || '');
     const multilingualRules = (detectedLanguage && detectedLanguage !== 'english')
-      ? promptRepository.getMultilingualRules(detectedLanguage).content
+      ? promptRepository.getMultilingualRules(detectedLanguage, isRomanized).content
       : '';
+
+    let conversationBlock = '';
+    if (params.conversationHistory && Array.isArray(params.conversationHistory) && params.conversationHistory.length > 0) {
+      const recent = params.conversationHistory.slice(-2);
+      conversationBlock = '=== PRIOR CONVERSATION CONTEXT ===\n' +
+        recent.map((q, idx) => `Prior Question ${idx + 1}: "${q.text || ''}"\nPrior Answer: ${(q.answer || '').replace(/<[^>]*>/g, ' ').slice(0, 200).trim()}...`).join('\n\n') +
+        '\nIf the current question is a follow-up (such as "Why did you say that?" or "What do you mean?"), explain the reasoning directly in terms of the earlier answer and the underlying chart/palm evidence.\n\n';
+    }
 
     const prompt =
       'You are PalmPyaar, answering one follow-up question about the customer\'s own personalised reading.\n\n' +
@@ -690,8 +706,10 @@ async function generateAnswer(params) {
       (previousRejection
         ? '=== PREVIOUS ATTEMPT WAS REJECTED BECAUSE: ' + previousRejection + ' ===\nFix every listed problem and do not repeat any of them.\n\n'
         : '') +
+      (conversationBlock || '') +
       'QUESTION INTERPRETATION: ' + intentForPrompt.domain +
-        (intentForPrompt.evaluation ? ' (the customer is asking how their current period is treating them overall)' : '') + '.\n' +
+        (intentForPrompt.evaluation ? ' (the customer is asking how their current period is treating them overall)' : '') +
+        (intentForPrompt.isFollowup ? ' (conversational follow-up referring to prior reading)' : '') + '.\n' +
       'Tradition: ' + tradition + '. Use only this tradition\'s terminology; never mix traditions.\n\n' +
       '=== OPENING (most important rule) ===\n' +
       answerContract.buildDirectAnswerInstruction(intentForPrompt) + '\n\n' +
@@ -699,8 +717,9 @@ async function generateAnswer(params) {
       answerContract.buildSectionInstruction(intentForPrompt, plan.sections, plan.hasWindow) + '\n\n' +
       '=== GROUNDING ===\n' +
       '- Answer the question that was asked. If it asks what something is like ("what kind of", "describe"), give a description of tendencies — never a date or an event.\n' +
-      '- If it asks for a count ("how many", "ఎన్ని", "ఎంతమంది", "ఎంత", "kitne", "entha mandi", "எத்தனை", "ಎಷ್ಟು"), hedge the number (", roughly", "in the range of") — never state an exact count as fact.\n' +
+      '- If it asks for a count (such as number of children: "how many", "ఎన్ని", "ఎంతమంది", "kitne", "entha mandi", "எத்தனை", "ಎಷ್ಟು"): NEVER state an exact number or fabricated child count. Explain honestly that palmistry and chart calculations do not determine exact child counts, and provide a qualified interpretation focused on family and readiness.\n' +
       '- If it asks when, give only the supplied time window; when none was supplied, say plainly that the evidence does not fix a date.\n' +
+      '- If the user asks about specific palm lines (heart line, head line, life line, fate line, children lines) or mounts: explain that the uploaded palm image was analyzed for hand geometry ratios, not fine palm lines or mounts. Do not claim to see unobserved palm lines.\n' +
       '- Otherwise open with the direct answer itself.\n\n' +
       '=== LANGUAGE ===\n' +
       answerContract.buildLanguageRules(intentForPrompt).map(function (r, i) { return (i + 1) + '. ' + r; }).join('\n') + '\n\n' +

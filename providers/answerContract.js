@@ -215,10 +215,15 @@ const PRODUCT_HOW_IT_WORKS_REDIRECT =
   'Your reading is generated for you — there is no palmist to visit and nothing to install. ' +
   'For a question about your life, ask away — that is what your reading is for.';
 
+const TECHNICAL_CODING_REDIRECT =
+  "Trying to turn PalmPyaar into a coding help desk? 😄 I'm here for palm readings and life questions. " +
+  'Ask me about love, career, relationships, or your next chapter instead.';
+
 function outOfScopeReply(intent) {
   const kind = intent && intent.outOfScopeKind;
   if (kind === 'model_privacy') return MODEL_PRIVACY_REDIRECT;
   if (kind === 'product_how_it_works') return PRODUCT_HOW_IT_WORKS_REDIRECT;
+  if (kind === 'technical_coding') return TECHNICAL_CODING_REDIRECT;
   return OUT_OF_SCOPE_REDIRECT;
 }
 
@@ -288,6 +293,12 @@ function buildLanguageRules(intent) {
   if (intent && intent.evaluation) {
     rules.push('The customer is asking how their current period is treating them overall. Answer the quality of the period plainly and favourably in substance, even when the period is mixed.');
   }
+  if (domain === 'CHILDREN') {
+    rules.push('This is a question about children or family growth. Never invent an exact child count, exact dates, or claim that a palm photo proves a specific number of future children. Palmistry and chart calculations reflect nurturing capacity and life readiness, not fixed counts. Address the question with honesty about these limits and provide a qualified interpretation.');
+  }
+  if (intent && intent.isFollowup) {
+    rules.push('This is a follow-up question referencing an earlier answer (e.g. "Why did you say that?"). Connect your explanation directly to the earlier answer and explain the underlying chart reasoning and evidence clearly.');
+  }
   return rules;
 }
 
@@ -304,6 +315,7 @@ module.exports = {
   OUT_OF_SCOPE_REDIRECT,
   MODEL_PRIVACY_REDIRECT,
   PRODUCT_HOW_IT_WORKS_REDIRECT,
+  TECHNICAL_CODING_REDIRECT,
   TECHNIQUE_GLOSSARY,
   HOUSE_THEMES,
   PLANET_THEMES

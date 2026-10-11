@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PalmPyaar Follow-Up Quality Gate â€” providers/followupQualityGate.js
  *
  * Deterministic, model-free validation of an AI follow-up answer. Runs on the
@@ -107,15 +107,16 @@ const OUT_OF_SCOPE_LEAK = [
  * answer that claims one is inventing it, in any language.
  */
 const PALM_CLAIM_PATTERNS = [
-  /\b(heart|head|life|fate) line\b/i,
+  /\b(heart|head|life|fate|sun|marriage|mercury|children|child) lines?\b/i,
   /\bmount(s)? of\b/i,
   /\bpalm lines?\b/i,
-  /\byour palm (shows|says|reveals|indicates)\b/i,
-  /హృదయ రేఖ|జీవన రేఖ|బుద్ధి రేఖ/,
-  /हृदय रेखा|आयु रेखा/,
-  /இதயக் கோடு|வாழ்க்கைக் கோடு/,
-  /ಹೃದಯರೇಖೆ/,
-  /ഹൃദയരേഖ/
+  /\byour palm (shows|says|reveals|indicates|proves|confirms)\b/i,
+  /\bseen in your (palm|hand)\b/i,
+  /హృదయ రేఖ|జీవన రేఖ|బుద్ధి రేఖ|భాగ్య రేఖ|విధి రేఖ|వివాహ రేఖ|సూర్య రేఖ|పిల్లల రేఖ|చేతి రేఖ/,
+  /हृदय रेखा|आयु रेखा|भाग्य रेखा|मस्तिष्क रेखा|जीवन रेखा|विवाह रेखा|सूर्य रेखा|संतान रेखा/,
+  /இதயக் கோடு|வாழ்க்கைக் கோடு|விதி கோடு|தலைக் கோடு|திருமணக் கோடு/,
+  /ಹೃದಯರೇಖೆ|ಜೀವನರೇಖೆ|ಭಾಗ್ಯರೇಖೆ|ವಿವಾಹ ರೇಖೆ/,
+  /ഹൃദയരേഖ|ജീവിതരേഖ|വിവാഹരേഖ/
 ];
 
 /**
@@ -129,7 +130,9 @@ const UNSUPPORTED_SPECIFICITY_PATTERNS = [
   /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?!\d)\b/i,
   /\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/,
   /\bin (?:about )?\d{1,4} (?:days?|weeks?|months?|years?)\b/i,
-  /\b\d{1,2}\s+(?:children|kids|babies)\b/i
+  /\b\d{1,2}\s+(?:children|kids|babies|sons?|daughters?)\b/i,
+  /\b\d{1,2}\s*(?:to|-)\s*\d{1,2}\s+(?:children|kids|babies)\b/i,
+  /\b\d{1,2}\s*(?:పిల్లలు|బిడ్డలు|बच्चे|संतान|குழந்தைகள்|மಕ್ಕಳು|കുട്ടികൾ)(?:\b|\s|$|[.,!?])/
 ];
 
 /**
@@ -331,9 +334,12 @@ function evaluate(answerHtml, intent, timingContext, detectedLanguage) {
       violations.push('OUT_OF_SCOPE_ANSWERED');
     }
     const isProductRedirect = intent.outOfScopeKind === 'product_how_it_works';
-    const englishRedirect = /palmpy aar|palmpy aar/i.test(lower) ||
+    const isTechnicalRedirect = intent.outOfScopeKind === 'technical_coding';
+    const englishRedirect = /palmpy\s*aar/i.test(lower) ||
       (isProductRedirect && /\bpalmpyaar\b/i.test(lower)) ||
-      /focused on your/i.test(lower) || /here to focus/i.test(lower);
+      (isTechnicalRedirect && (/coding help desk/i.test(lower) || /help desk/i.test(lower))) ||
+      /focused on your/i.test(lower) || /here to focus/i.test(lower) ||
+      /coding help desk/i.test(lower) || /help desk/i.test(lower);
     const nativeBrand = NATIVE_BRAND_REDIRECT[String(detectedLanguage || '').toLowerCase()];
     const nativeRedirect = !!(nativeBrand && nativeBrand.test(text));
     if (!astrologyLeak && !englishRedirect && !nativeRedirect) {

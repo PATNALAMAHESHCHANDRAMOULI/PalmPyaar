@@ -427,7 +427,7 @@ const LANGUAGE_SCRIPT_NAMES = {
  * @param {string|null} language - detected language code, or null for auto-detect
  * @returns {{ id: string, title: string, version: string, content: string }}
  */
-function getMultilingualRules(language) {
+function getMultilingualRules(language, isRomanized) {
     const code = typeof language === 'string' ? language.toLowerCase() : null;
 
     if (!code) {
@@ -458,6 +458,20 @@ Section labels stay in English as-is in every language: DIRECT ANSWER, WHY THIS 
 Section labels stay in English as-is: DIRECT ANSWER, WHY THIS SHOWS UP, WHAT THIS MEANS FOR YOU, WHAT THIS PERIOD FAVORS, WHAT THIS PERIOD ASKS OF YOU, WHAT THIS SAYS ABOUT YOU, WHAT TO WORK WITH, STRONGER WINDOW, BOTTOM LINE, and the timing window label. Do not translate section labels — they are structural markers.
 
 - Keep years, dates and the derived timing window exactly as given — numbers pass through unchanged.`
+        };
+    }
+
+    if (isRomanized) {
+        return {
+            id: "multilingual_rules",
+            title: "Multilingual Answer Rules",
+            version: "1.0.0",
+            content: `The customer wrote in Romanized ${displayName} (Latin/English characters). Your answer MUST be written in natural, conversational Romanized ${displayName} or ${displayName} (${scriptName}). Never answer in pure English.
+
+Section labels stay in English as-is in every language: DIRECT ANSWER, WHY THIS SHOWS UP, WHAT THIS MEANS FOR YOU, WHAT THIS PERIOD FAVORS, WHAT THIS PERIOD ASKS OF YOU, WHAT THIS SAYS ABOUT YOU, WHAT TO WORK WITH, STRONGER WINDOW, BOTTOM LINE, and the timing window label. Do not translate section labels — they are structural markers the interface matches on.
+
+- Keep years, dates and the derived timing window exactly as given — numbers pass through unchanged.
+- Reply in conversational, natural ${displayName} phrasing rather than rigid machine translation.`
         };
     }
 

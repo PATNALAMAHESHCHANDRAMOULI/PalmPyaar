@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PalmPyaar Ask-Question API â€” POST /api/ask-question
  *
  * Post-payment 3-question entitlement endpoint. After a successful payment,
@@ -225,7 +225,15 @@ module.exports = async function handler(req, res) {
     // semantically (lib/questionIntent) and selects both the evidence topic
     // and the answer structure (providers/answerContract).
     let answer;
-    const questionIntentResult = intentClassifier.classifyQuestion(question);
+    const previousQuestions = (verifiedPayload && Array.isArray(verifiedPayload.questions))
+      ? verifiedPayload.questions
+      : [];
+    const lastInteraction = previousQuestions.length ? previousQuestions[previousQuestions.length - 1] : null;
+    const questionContext = {
+      previousQuestion: lastInteraction ? lastInteraction.text : null,
+      previousAnswer: lastInteraction ? lastInteraction.answer : null
+    };
+    const questionIntentResult = intentClassifier.classifyQuestion(question, questionContext);
     const questionIntent = {
       topic: questionIntentResult.topic || 'general',
       timing: questionIntentResult.timing === true,
@@ -237,7 +245,8 @@ module.exports = async function handler(req, res) {
       adult: questionIntentResult.adult,
       evaluation: questionIntentResult.evaluation,
       descriptive: questionIntentResult.descriptive,
-      scores: questionIntentResult.scores
+      scores: questionIntentResult.scores,
+      isFollowup: questionIntentResult.isFollowup === true
     };
     const timingContext = questionIntent.topic === 'name-meaning'
       ? { supported: false, topic: questionIntent.topic }
@@ -251,16 +260,26 @@ module.exports = async function handler(req, res) {
       ? nameMeaning.buildNameMeaningContext(questionIntent.name || name)
       : null;
     if (questionIntent.outOfScopeKind === 'model_privacy' ||
-        questionIntent.outOfScopeKind === 'product_how_it_works') {
-      // Model/provider privacy and product "how it works": answered here,
-      // before any provider call, so disclosure is structurally impossible
-      // rather than merely discouraged. The reply is always in the
-      // customer's detected language.
+        questionIntent.outOfScopeKind === 'product_how_it_works' ||
+        questionIntent.outOfScopeKind === 'technical_coding') {
+      // Model/provider privacy, product "how it works", and technical coding questions:
+      // answered here, before any provider call, so disclosure or model drift is structurally impossible.
+      // The reply is always in the customer's detected language.
       answer = buildRedirectAnswer(questionIntent, detectedLanguage);
     } else if (useAi && process.env.GROQ_API_KEY) {
-      answer = await generateAiAnswer(provider, { name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext, detectedLanguage });
+      answer = await generateAiAnswer(provider, {
+        name, dob, birthTime, birthplace, tradition, photoHash, palmEvidence,
+        astrologyData, question, questionIntent, nakshatraMode, nakshatra,
+        timingContext, nameMeaningContext, detectedLanguage,
+        conversationHistory: previousQuestions
+      });
     } else {
-      answer = generateTemplateAnswer({ name, dob, birthTime, birthplace, tradition, astrologyData, question, questionIntent, nakshatraMode, nakshatra, timingContext, nameMeaningContext, detectedLanguage });
+      answer = generateTemplateAnswer({
+        name, dob, birthTime, birthplace, tradition, astrologyData,
+        question, questionIntent, nakshatraMode, nakshatra, timingContext,
+        nameMeaningContext, detectedLanguage,
+        conversationHistory: previousQuestions
+      });
     }
 
      // --- Issue next token ---
@@ -586,7 +605,14 @@ function generateTemplateAnswer(params) {
     let body = '';
     switch (String(section).toUpperCase()) {
       case 'DIRECT ANSWER':
-        body = (intent.descriptive && descriptiveMap[domain]) || directMap[domain] || directMap.GENERAL;
+        if (intent.isFollowup) {
+          body = bundle && bundle.followupDirect
+            ? bundle.followupDirect
+            : 'Looking directly at what was asked in light of your earlier question: ' +
+              ((intent.descriptive && descriptiveMap[domain]) || directMap[domain] || directMap.GENERAL);
+        } else {
+          body = (intent.descriptive && descriptiveMap[domain]) || directMap[domain] || directMap.GENERAL;
+        }
         break;
       case 'WHY THIS SHOWS UP':
         // English prepends the English evidence sentence built from the chart
@@ -650,6 +676,8 @@ function buildRedirectAnswer(intent, detectedLanguage) {
       reply = bundle.redirect.modelPrivacy;
     } else if (kind === 'product_how_it_works') {
       reply = bundle.productHowItWorks;
+    } else if (kind === 'technical_coding' && bundle.redirect && bundle.redirect.technicalCoding) {
+      reply = bundle.redirect.technicalCoding;
     } else {
       reply = bundle.redirect.general;
     }
