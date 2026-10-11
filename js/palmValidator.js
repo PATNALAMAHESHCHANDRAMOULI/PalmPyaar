@@ -100,19 +100,34 @@ var PalmValidator = (function () {
    * have their tip above (lower y) their PIP joint — i.e. extended.
    */
   function isHandOpen(landmarks) {
+    if (!landmarks || landmarks.length < 21) return false;
     var fingerTips = [8, 12, 16, 20];   // index, middle, ring, pinky fingertips
     var fingerPIPs = [6, 10, 14, 18];   // matching PIP joints
+    var fingerMCPs = [5, 9, 13, 17];   // matching MCP joints
+    var wrist = landmarks[0];
+
+    function dist(a, b) {
+      var dx = a.x - b.x;
+      var dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
 
     var extendedCount = 0;
     for (var i = 0; i < fingerTips.length; i++) {
       var tip = landmarks[fingerTips[i]];
       var pip = landmarks[fingerPIPs[i]];
-      if (tip && pip && tip.y < pip.y) {
-        extendedCount++;
+      var mcp = landmarks[fingerMCPs[i]];
+      if (tip && pip) {
+        var isUp = tip.y < pip.y;
+        var isExtendedDist = (wrist && dist(tip, wrist) > dist(pip, wrist) * 1.02) ||
+                             (mcp && dist(tip, mcp) > dist(pip, mcp) * 1.02);
+        if (isUp || isExtendedDist) {
+          extendedCount++;
+        }
       }
     }
 
-    return extendedCount >= 3;
+    return extendedCount >= 2;
   }
 
   /**
@@ -759,6 +774,11 @@ var PalmValidator = (function () {
          }
 
          // 2. File size
+         if (!file.size || file.size === 0) {
+           validating = false;
+           reject(new Error('The uploaded file is empty. Please choose a valid photo.'));
+           return;
+         }
          if (file.size > MAX_FILE_SIZE) {
            validating = false;
            reject(new Error('Image is too large. Please choose a file under 10 MB.'));
@@ -779,15 +799,8 @@ var PalmValidator = (function () {
               return;
             }
 
-            // 5. Photo quality: brightness, contrast, focus
+            // 5. Photo quality: brightness, contrast, focus (evaluated for diagnostics if hand detection fails)
             var quality = analyzeImageQuality(sampleImagePixels(img));
-            if (quality && quality.problem) {
-              validating = false;
-              var qualityError = new Error(getPhotoRequestMessage('quality'));
-              qualityError.problem = quality.problem;
-              reject(qualityError);
-              return;
-            }
 
             // 6. Hand detection
             var settled = false;
@@ -800,6 +813,12 @@ var PalmValidator = (function () {
 
              if (handCount === 0) {
                validating = false;
+               if (quality && quality.problem) {
+                 var qualityError = new Error(getPhotoRequestMessage('quality'));
+                 qualityError.problem = quality.problem;
+                 reject(qualityError);
+                 return;
+               }
                reject(new Error('No hand detected. Please upload a clear photo of your palm.'));
                return;
              }
@@ -835,11 +854,21 @@ var PalmValidator = (function () {
                // 9. Palm usability: crop, spread, orientation
                var usability = assessPalmUsability(landmarks);
                if (!usability.ok) {
-                 validating = false;
-                 var usabilityError = new Error(getPhotoRequestMessage('palm'));
-                 usabilityError.problem = usability.problem;
-                 reject(usabilityError);
-                 return;
+                 // Finger spacing (fingers_together) and 2-D landmark back-of-hand
+                 // heuristic are not strict rejections when a genuine palm is visibly present.
+                 var isStrictReject = usability.problem !== 'fingers_together' &&
+                                      usability.problem !== 'back_of_hand';
+                 if (usability.problem === 'sideways') {
+                   // Allow slightly angled/rotated hand if fingers are open
+                   isStrictReject = !isHandOpen(landmarks);
+                 }
+                 if (isStrictReject) {
+                   validating = false;
+                   var usabilityError = new Error(getPhotoRequestMessage('palm'));
+                   usabilityError.problem = usability.problem;
+                   reject(usabilityError);
+                   return;
+                 }
                }
 
                // 10. Palm-facing heuristic (recorded in the result payload)

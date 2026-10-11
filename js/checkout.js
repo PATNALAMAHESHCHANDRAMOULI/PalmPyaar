@@ -17,7 +17,10 @@
   var currentOrderId = '';
   var currentStateToken = '';
   var rzpInstance = null;
-  var DEFAULT_BTN_TEXT = 'Unlock full reading \u2014 \u20B920';
+  var DEFAULT_BTN_TEXT = 'Unlock full reading \u2014 \u20B99';
+  var paymentSucceeded = false;
+  var isVerifying = false;
+  var lastResultUrl = '';
 
   function $(id) {
     return document.getElementById(id);
@@ -151,6 +154,7 @@
   }
 
   function verifyPayment(response, data) {
+    isVerifying = true;
     setButtonBusy('Verifying your payment\u2026');
 
     fetch('/api/verify-razorpay', {
@@ -182,13 +186,37 @@
       })
       .then(function (res) {
         if (res.body && res.body.success && res.body.resultUrl) {
+          paymentSucceeded = true;
+          isVerifying = false;
+          lastResultUrl = res.body.resultUrl;
+          try {
+            sessionStorage.setItem('palmpyaar_paid_result_url', res.body.resultUrl);
+            localStorage.setItem('palmpyaar_paid_result_url', res.body.resultUrl);
+            if (res.body.orderId) {
+              localStorage.setItem('palmpyaar_paid_order_id', res.body.orderId);
+            }
+          } catch (e) {}
+
           window.location.href = res.body.resultUrl;
+
+          // Safe recovery path if redirect is delayed or interrupted
+          if (unlockBtn) {
+            unlockBtn.disabled = false;
+            unlockBtn.setAttribute('aria-disabled', 'false');
+            unlockBtn.textContent = 'View your reading \u2192';
+            unlockBtn.onclick = function (e) {
+              e.preventDefault();
+              window.location.href = res.body.resultUrl;
+            };
+          }
         } else {
+          isVerifying = false;
           setError((res.body && res.body.error) || 'We could not verify your payment. Please try again.');
           resetUnlockButton();
         }
       })
       .catch(function () {
+        isVerifying = false;
         setError('Network error while verifying your payment. If you were charged, please contact support with your transaction reference.');
         resetUnlockButton();
       });
@@ -209,7 +237,9 @@
       },
       modal: {
         ondismiss: function () {
-          resetUnlockButton();
+          if (!paymentSucceeded && !isVerifying) {
+            resetUnlockButton();
+          }
         }
       }
     };
@@ -229,6 +259,20 @@
   }
 
   function startCheckout() {
+    if (isVerifying) return;
+    if (paymentSucceeded && lastResultUrl) {
+      window.location.href = lastResultUrl;
+      return;
+    }
+    var savedUrl = null;
+    try {
+      savedUrl = sessionStorage.getItem('palmpyaar_paid_result_url') || localStorage.getItem('palmpyaar_paid_result_url');
+    } catch (e) {}
+    if (savedUrl) {
+      window.location.href = savedUrl;
+      return;
+    }
+
     var data = validateInputs();
     if (!data) return;
 
@@ -286,6 +330,15 @@
     form = $('reading-form');
 
     if (unlockBtn) {
+      try {
+        var savedPaidUrl = sessionStorage.getItem('palmpyaar_paid_result_url') || localStorage.getItem('palmpyaar_paid_result_url');
+        if (savedPaidUrl) {
+          unlockBtn.disabled = false;
+          unlockBtn.setAttribute('aria-disabled', 'false');
+          unlockBtn.textContent = 'View your reading \u2192';
+        }
+      } catch (e) {}
+
       unlockBtn.addEventListener('click', function (e) {
         e.preventDefault();
         startCheckout();

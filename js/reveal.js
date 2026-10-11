@@ -95,7 +95,22 @@
     var contentEl = document.getElementById('reveal-content');
     var loadingTitle = document.getElementById('loading-title');
 
-    var params = new URLSearchParams(window.location.search);
+    var search = window.location.search;
+    if (!search) {
+      try {
+        var cachedSearch = sessionStorage.getItem('palmpyaar_paid_result_search') || localStorage.getItem('palmpyaar_paid_result_search');
+        if (cachedSearch) {
+          search = cachedSearch;
+        }
+      } catch (e) {}
+    } else {
+      try {
+        sessionStorage.setItem('palmpyaar_paid_result_search', search);
+        localStorage.setItem('palmpyaar_paid_result_search', search);
+      } catch (e) {}
+    }
+
+    var params = new URLSearchParams(search);
     var name = params.get('name') || 'Friend';
     var dob = params.get('dob') || '';
     var birthTime = params.get('birthTime') || '';
@@ -112,7 +127,7 @@
     }
 
     // Step 2: Call /api/generate-reading so server verifies TOKEN_SECRET HMAC
-    var fetchUrl = '/api/generate-reading' + window.location.search;
+    var fetchUrl = '/api/generate-reading' + search;
 
     fetch(fetchUrl)
       .then(function (res) {

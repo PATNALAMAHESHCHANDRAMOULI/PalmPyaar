@@ -27,7 +27,9 @@ const suites = [
   'scripts/testTimingEngine.js',
   'scripts/testShareCard.js',
   'scripts/testPalmSideDetection.js',
-  'scripts/testPalmSideRealImages.js'
+  'scripts/testPalmSideRealImages.js',
+  'scripts/testPalmRegressionFix.js',
+  'scripts/testPaymentFix.js'
 ];
 
 let failed = 0;
